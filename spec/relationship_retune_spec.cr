@@ -4,16 +4,14 @@ describe "relationship closure and finite radio retune" do
   it "retains only acknowledged peers and restores a missed prior contact " +
      "explicitly through a hail" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "finite retune test passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
 
       peers = {} of String => Tinrelay::Client
       %w(beta gamma delta).each do |ship|
         peer = TinrelaySpec.admit_contact(
-          root, origin, ship, passphrase, alpha
+          root, origin, ship, alpha
         )
         peer.send("steward@alpha", "establish #{ship}")
         event = alpha.radio_wait(spool, hold_seconds: 0)
@@ -142,15 +140,13 @@ describe "relationship closure and finite radio retune" do
 
   it "rejects an owner-authorized retune with a wrong-sized radio signing key" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "malformed radio key retune passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+        File.join(root, "alpha.keyring"), origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
       now = Time.utc.to_unix
       prior = alpha.keyring.data.radio!
-      owner = alpha.keyring.owner(passphrase)
+      owner = alpha.keyring.owner
       encryption = Tinrelay::Crypto.box_keypair
       certificate = Tinrelay::ShipRadioCertificate.new(
         "alpha", 2,

@@ -40,10 +40,8 @@ end
 describe "ordinary self-transmission" do
   it "routes an empty local part as ordinary ship-general attention" do
     TinrelaySpec.with_server do |root, origin, _api|
-      passphrase = "ship general transmission passphrase"
       ship = Tinrelay::Client.join(
-        File.join(root, "harbor.keyring"), origin, "harbor", passphrase
-      )
+        File.join(root, "harbor.keyring"), origin, "harbor")
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
       ship.send("@harbor", "general call")
@@ -60,10 +58,8 @@ describe "ordinary self-transmission" do
 
   it "uses the direct repeater path, ordinary pointer routing, and no relationship" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "self direct transmission passphrase"
       ship = Tinrelay::Client.join(
-        File.join(root, "harbor.keyring"), origin, "harbor", passphrase
-      )
+        File.join(root, "harbor.keyring"), origin, "harbor")
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
       ship.keyring.data.contacts.should be_empty
@@ -113,10 +109,8 @@ describe "ordinary self-transmission" do
 
   it "uses durable fallback without a waiter and after an interrupted handoff" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "self fallback transmission passphrase"
       ship = Tinrelay::Client.join(
-        File.join(root, "harbor.keyring"), origin, "harbor", passphrase
-      )
+        File.join(root, "harbor.keyring"), origin, "harbor")
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
       absent = ship.send("steward@harbor", "waiter absent")
@@ -135,7 +129,7 @@ describe "ordinary self-transmission" do
       spool.routed(absent_event.local_id)
 
       capture = SelfTransmissionCaptureRemote.new(origin)
-      Tinrelay::Client.new(ship.keyring, passphrase, capture)
+      Tinrelay::Client.new(ship.keyring, capture)
         .send("steward@harbor", "handoff interrupted")
       interrupted = capture.envelope.not_nil!
       wait_result = Channel(String).new(1)
@@ -165,13 +159,11 @@ describe "ordinary self-transmission" do
 
   it "keeps the exception exact, relationship-gated, and authentication-blind" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "self boundary transmission passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+        File.join(root, "alpha.keyring"), origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       capture = SelfTransmissionCaptureRemote.new(origin)
-      Tinrelay::Client.new(beta.keyring, passphrase, capture)
+      Tinrelay::Client.new(beta.keyring, capture)
         .send("steward@beta", "sealed for beta")
       self_envelope = capture.envelope.not_nil!
 

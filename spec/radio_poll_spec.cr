@@ -32,10 +32,8 @@ describe "immediate radio polling" do
     TinrelaySpec.with_server(
       radio_wait_heartbeat_interval: 50.milliseconds
     ) do |root, origin, api|
-      passphrase = "radio disconnect passphrase"
       ship = Tinrelay::Client.join(
-        File.join(root, "ship.keyring"), origin, "ship", passphrase
-      )
+        File.join(root, "ship.keyring"), origin, "ship")
       request = TinrelaySpec.radio_wait_request(ship, 100)
       uri = URI.parse(origin)
       socket = TCPSocket.new(uri.host.not_nil!, uri.port.not_nil!)
@@ -63,10 +61,8 @@ describe "immediate radio polling" do
     TinrelaySpec.with_server(
       radio_wait_heartbeat_interval: 50.milliseconds
     ) do |root, origin, _api|
-      passphrase = "radio heartbeat response passphrase"
       ship = Tinrelay::Client.join(
-        File.join(root, "ship.keyring"), origin, "ship", passphrase
-      )
+        File.join(root, "ship.keyring"), origin, "ship")
       request = TinrelaySpec.radio_wait_request(ship, 1)
 
       response = Tinrelay::RadioWaitResponse.from_json(
@@ -79,10 +75,8 @@ describe "immediate radio polling" do
 
   it "accepts the signed 100-second maximum and rejects a longer hold" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "radio hold boundary passphrase"
       ship = Tinrelay::Client.join(
-        File.join(root, "ship.keyring"), origin, "ship", passphrase
-      )
+        File.join(root, "ship.keyring"), origin, "ship")
 
       accepted = TinrelaySpec.radio_wait_request(ship, 100)
       api.store.wait_once(accepted).empty?.should be_true
@@ -99,11 +93,9 @@ describe "immediate radio polling" do
       "http://127.0.0.1:1", [] of Tinrelay::RadioWaitResponse
     )
     keyring = Tinrelay::Keyring.create(
-      File.join(root, "ship.keyring"), remote.origin, "ship",
-      "radio default hold passphrase"
-    )
+      File.join(root, "ship.keyring"), remote.origin, "ship")
 
-    client = Tinrelay::Client.new(keyring, "radio default hold passphrase", remote)
+    client = Tinrelay::Client.new(keyring, remote)
     spool = Tinrelay::Spool.new(File.join(root, "inbox"))
     expect_raises(Exception, "test radio sequence is empty") do
       client.radio_wait(spool)
@@ -118,19 +110,17 @@ describe "immediate radio polling" do
 
   it "surfaces durable local work even when relay cleanup is unavailable" do
     TinrelaySpec.with_server do |root, origin, _api|
-      passphrase = "local poll recovery passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
       beta.send("steward@alpha", "already safe at home")
       pending = alpha.radio_wait(spool, hold_seconds: 0)
 
       offline = RadioPollRemote.new(origin, [] of Tinrelay::RadioWaitResponse, true)
-      replayed = Tinrelay::Client.new(alpha.keyring, passphrase, offline)
+      replayed = Tinrelay::Client.new(alpha.keyring, offline)
         .radio_poll(spool)
 
       replayed.not_nil!.local_id.should eq(pending.local_id)
@@ -156,11 +146,9 @@ describe "immediate radio polling" do
       "http://127.0.0.1:1", [] of Tinrelay::RadioWaitResponse, true
     )
     keyring = Tinrelay::Keyring.create(
-      File.join(root, "alpha.keyring"), "http://127.0.0.1:1", "alpha",
-      "offline wait passphrase"
-    )
+      File.join(root, "alpha.keyring"), "http://127.0.0.1:1", "alpha")
 
-    event = Tinrelay::Client.new(keyring, "offline wait passphrase", offline)
+    event = Tinrelay::Client.new(keyring, offline)
       .radio_wait(spool, hold_seconds: 0)
 
     event.local_id.should eq(record.local_id)
@@ -172,12 +160,10 @@ describe "immediate radio polling" do
 
   it "collects immediately available relay work through the ordinary path" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "immediate relay poll passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
       sent = beta.send("steward@alpha", "waiting at the repeater")
@@ -196,12 +182,10 @@ describe "immediate radio polling" do
 
   it "collects new relay work while older local work remains unrouted" do
     TinrelaySpec.with_server do |root, origin, _api|
-      passphrase = "background radio collection passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
       beta.send("steward@alpha", "first local transmission")
@@ -218,12 +202,10 @@ describe "immediate radio polling" do
 
   it "makes exactly one zero-hold relay attempt and reports quiet" do
     TinrelaySpec.with_server do |root, origin, _api|
-      passphrase = "quiet radio poll passphrase"
       ship = Tinrelay::Client.join(
-        File.join(root, "ship.keyring"), origin, "ship", passphrase
-      )
+        File.join(root, "ship.keyring"), origin, "ship")
       remote = RadioPollRemote.new(origin, [Tinrelay::RadioWaitResponse.new])
-      client = Tinrelay::Client.new(ship.keyring, passphrase, remote)
+      client = Tinrelay::Client.new(ship.keyring, remote)
 
       client.radio_poll(Tinrelay::Spool.new(File.join(root, "inbox"))).should be_nil
       remote.holds.should eq([0])

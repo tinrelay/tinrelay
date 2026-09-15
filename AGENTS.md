@@ -51,9 +51,10 @@ Use these nouns consistently:
   ship-name oracle, and silence is not a delivery receipt.
 - Protocol version is the compatibility boundary. A build label may aid
   debugging; it is not trust, compatibility, or independent integrity evidence.
-- Passphrases and private keys do not belong in argv, logs, screenshots,
-  recovery notes, or tests that can leak them. Treat plaintext correspondence
-  as private user data and do not copy it into logs, screenshots, or fixtures.
+- Private keys and legacy migration passphrases do not belong in argv, logs,
+  screenshots, recovery notes, or tests that can leak them. Treat plaintext
+  correspondence as private user data and do not copy it into logs, screenshots,
+  or fixtures.
 
 TinRelay is live and has two users. Never rewrite an applied database migration; add
 a new forward migration. Treat protocol 1's wire fields, canonical signed bytes,

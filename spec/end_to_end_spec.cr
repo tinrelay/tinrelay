@@ -3,13 +3,11 @@ require "./spec_helper"
 describe "the complete TinRelay ship-to-ship vertical" do
   it "claims, connects, spools before ack, routes pointers, and erases relay payloads" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "test passphrase is long"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
 
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       alpha_spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
       beta_spool = Tinrelay::Spool.new(File.join(root, "beta-inbox"))
@@ -70,12 +68,10 @@ describe "the complete TinRelay ship-to-ship vertical" do
 
   it "survives the spool-before-ack crash seam without making another body copy" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "crash seam passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
       sent = beta.send("steward@alpha", "persist once")
@@ -114,14 +110,12 @@ describe "the complete TinRelay ship-to-ship vertical" do
   it "enforces expiry, relationship visibility, blind invalid-destination handling, " +
      "tamper checks, and freeze" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "failure case passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
-      gamma = TinrelaySpec.admit(root, origin, "gamma", passphrase)
+      gamma = TinrelaySpec.admit(root, origin, "gamma")
       expect_raises(Tinrelay::NotFound) { gamma.who("alpha") }
       TinrelaySpec.connect(root, alpha, gamma)
       JSON.parse(gamma.who("alpha"))["ship"].as_s.should eq("alpha")

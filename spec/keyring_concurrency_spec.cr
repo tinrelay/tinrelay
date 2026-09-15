@@ -48,21 +48,19 @@ class ConcurrentJoinRelay
 end
 
 module KeyringConcurrencySpec
-  def self.reload(client : Tinrelay::Client, passphrase : String,
+  def self.reload(client : Tinrelay::Client,
                   remote : Tinrelay::Remote? = nil) : Tinrelay::Client
     Tinrelay::Client.new(
       Tinrelay::Keyring.load(
-        client.keyring.path, passphrase, client.keyring.owner_path
+        client.keyring.path, client.keyring.owner_path
       ),
-      passphrase,
       remote
     )
   end
 
   def self.close_one_of_beta_contacts(root : String, origin : String,
-                                      passphrase : String,
                                       beta : Tinrelay::Client) : Nil
-    delta = TinrelaySpec.admit(root, origin, "delta", passphrase)
+    delta = TinrelaySpec.admit(root, origin, "delta")
     TinrelaySpec.connect(root, beta, delta)
     beta.close_contact("delta")
   end
@@ -72,43 +70,41 @@ describe "local ship identity concurrency" do
   it "rejects a whole-snapshot save after another process has advanced the file" do
     root = TinrelaySpec.temporary_root
     path = File.join(root, "ship.keyring")
-    passphrase = "stale snapshot save passphrase"
-    Tinrelay::Keyring.create(path, "http://127.0.0.1:1", "ship", passphrase)
-    first = Tinrelay::Keyring.load(path, passphrase)
-    stale = Tinrelay::Keyring.load(path, passphrase)
+    Tinrelay::Keyring.create(path, "http://127.0.0.1:1", "ship")
+    first = Tinrelay::Keyring.load(path)
+    stale = Tinrelay::Keyring.load(path)
     first.data.radio!.retire_after = 20_i64
-    first.save(passphrase)
+    first.save
     stale.data.radio!.retire_after = 30_i64
 
     expect_raises(Tinrelay::Conflict, /changed since it was loaded/) do
-      stale.save(passphrase)
+      stale.save
     end
-    Tinrelay::Keyring.load(path, passphrase).data.radio!.retire_after.should eq(20_i64)
+    Tinrelay::Keyring.load(path).data.radio!.retire_after.should eq(20_i64)
   ensure
     FileUtils.rm_r(root) if root && Dir.exists?(root)
   end
 
   it "merges a returned peer retune with a contact allowed by another client" do
     TinrelaySpec.with_server do |root, origin, _api|
-      passphrase = "concurrent allow keyring passphrase"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
-      stale_collector = KeyringConcurrencySpec.reload(alpha, passphrase)
+      stale_collector = KeyringConcurrencySpec.reload(alpha)
 
-      gamma = TinrelaySpec.admit(root, origin, "gamma", passphrase)
+      gamma = TinrelaySpec.admit(root, origin, "gamma")
       gamma.hail("alpha")
       hail_spool = Tinrelay::Spool.new(File.join(root, "allow-inbox"))
-      fresh = KeyringConcurrencySpec.reload(alpha, passphrase)
+      fresh = KeyringConcurrencySpec.reload(alpha)
       hail = fresh.radio_wait(hail_spool, hold_seconds: 0)
       fresh.allow_contact(hail.local_id, hail_spool)
 
       KeyringConcurrencySpec.close_one_of_beta_contacts(
-        root, origin, passphrase, beta
+        root, origin, beta
       )
       stale_collector.radio_poll(Tinrelay::Spool.new(File.join(root, "collector-inbox")))
 
-      stored = Tinrelay::Keyring.load(alpha.keyring.path, passphrase)
+      stored = Tinrelay::Keyring.load(alpha.keyring.path)
       stored.data.contact!("gamma").ship.should eq("gamma")
       stored.data.contact!("beta").radio_certificate.generation.should eq(2)
     end
@@ -116,19 +112,18 @@ describe "local ship identity concurrency" do
 
   it "honors a contact block written while a collector held an older snapshot" do
     TinrelaySpec.with_server do |root, origin, _api|
-      passphrase = "concurrent block keyring passphrase"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
-      stale_collector = KeyringConcurrencySpec.reload(alpha, passphrase)
+      stale_collector = KeyringConcurrencySpec.reload(alpha)
       beta.send("steward@alpha", "must not cross a newer local block")
 
-      KeyringConcurrencySpec.reload(alpha, passphrase).close_contact("beta")
+      KeyringConcurrencySpec.reload(alpha).close_contact("beta")
       spool = Tinrelay::Spool.new(File.join(root, "blocked-inbox"))
       stale_collector.radio_poll(spool).should be_nil
 
       spool.list.should be_empty
-      stored = Tinrelay::Keyring.load(alpha.keyring.path, passphrase)
+      stored = Tinrelay::Keyring.load(alpha.keyring.path)
       stored.data.contact!("beta").blocked?.should be_true
       stored.data.active_radio_generation.should eq(2)
     end
@@ -136,35 +131,33 @@ describe "local ship identity concurrency" do
 
   it "merges a returned peer retune with a concurrent local owner rotation" do
     TinrelaySpec.with_server do |root, origin, _api|
-      passphrase = "concurrent owner rotation passphrase"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
-      stale_collector = KeyringConcurrencySpec.reload(alpha, passphrase)
+      stale_collector = KeyringConcurrencySpec.reload(alpha)
 
-      KeyringConcurrencySpec.reload(alpha, passphrase).rotate_owner.should eq(2)
+      KeyringConcurrencySpec.reload(alpha).rotate_owner.should eq(2)
       KeyringConcurrencySpec.close_one_of_beta_contacts(
-        root, origin, passphrase, beta
+        root, origin, beta
       )
       stale_collector.radio_poll(Tinrelay::Spool.new(File.join(root, "owner-inbox")))
 
-      stored = Tinrelay::Keyring.load(alpha.keyring.path, passphrase)
+      stored = Tinrelay::Keyring.load(alpha.keyring.path)
       stored.data.owner_generation.should eq(2)
-      stored.owner(passphrase).generation.should eq(2)
+      stored.owner.generation.should eq(2)
       stored.data.contact!("beta").radio_certificate.generation.should eq(2)
     end
   end
 
   it "does not hold the ship identity lock while the radio request waits" do
     TinrelaySpec.with_server do |root, origin, _api|
-      passphrase = "wait lock boundary passphrase"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
       alpha.keyring.data.contact!("beta").blocked_at = Time.utc.to_unix
-      alpha.keyring.save(passphrase)
+      alpha.keyring.save
       remote = BlockingRadioRemote.new(origin)
-      collector = KeyringConcurrencySpec.reload(alpha, passphrase, remote)
+      collector = KeyringConcurrencySpec.reload(alpha, remote)
       finished = Channel(Nil).new(1)
       spawn do
         collector.radio_poll(Tinrelay::Spool.new(File.join(root, "wait-inbox")))
@@ -174,7 +167,7 @@ describe "local ship identity concurrency" do
 
       changed = Channel(Nil).new(1)
       spawn do
-        KeyringConcurrencySpec.reload(alpha, passphrase).unblock_contact("beta")
+        KeyringConcurrencySpec.reload(alpha).unblock_contact("beta")
         changed.send(nil)
       end
       TinrelaySpec.receive(changed, 1.second)
@@ -194,11 +187,10 @@ describe "local ship identity concurrency" do
     api = Tinrelay::API.new(config)
     relay = ConcurrentJoinRelay.new(api)
     path = File.join(root, "shared.keyring")
-    passphrase = "same path join ownership passphrase"
     first_result = Channel(Exception?).new(1)
     spawn do
       begin
-        Tinrelay::Client.join(path, relay.origin, "shared", passphrase)
+        Tinrelay::Client.join(path, relay.origin, "shared")
         first_result.send(nil)
       rescue ex
         first_result.send(ex)
@@ -206,13 +198,13 @@ describe "local ship identity concurrency" do
     end
     TinrelaySpec.receive(relay.first_entered)
 
-    winner = Tinrelay::Client.join(path, relay.origin, "shared", passphrase)
+    winner = Tinrelay::Client.join(path, relay.origin, "shared")
     relay.release_first.send(nil)
     TinrelaySpec.receive(first_result).should be_a(Tinrelay::RegistrationUnavailable)
 
     File.exists?(path).should be_true
     File.exists?("#{path}.owner").should be_true
-    stored = Tinrelay::Keyring.load(path, passphrase)
+    stored = Tinrelay::Keyring.load(path)
     stored.data.owner_public_key.should eq(winner.keyring.data.owner_public_key)
     api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(1_i64)
   ensure

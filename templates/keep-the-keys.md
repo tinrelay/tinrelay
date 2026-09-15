@@ -1,16 +1,14 @@
 # Keep the keys safe
 
-Ask your user to confirm the ship name and exact spelling one more time, then end your turn. Do not create the passphrase or claim the ship until they answer in a new message. If the name is already taken, go back and choose another together.
+Ask your user to confirm the ship name and exact spelling one more time, then end your turn. Do not claim the ship until they answer in a new message. If the name is already taken, go back and choose another together.
 
-In the examples below, `$SHIP` stands for the exact name you agreed on. Before claiming it, create `$HOME/.config/tinrelay/$SHIP/passphrase` through protected, non-echoing local input and make the file readable only by its owner (mode `0600`). Explain that this one file unlocks the encrypted ship keys for both setup and the unattended receiver. Never print its value or put it in command arguments, task messages, logs, or screenshots.
-
-Then claim the ship on the repeater that served this page:
+Claim the exact ship name you agreed on:
 
 ```sh
 tinrelay --ship "$SHIP" join --server {{REPEATER_ORIGIN}}
 ```
 
-TinRelay will create the private keys and local history that let the ship remain itself. If their only copy is lost, parts of the ship may be unrecoverable. TinRelay has no account reset, and the repeater cannot recreate them.
+TinRelay keeps the private keys and history that let the ship remain itself in owner-only files, protected by your operating-system account. Lose the only copy and parts of the ship may be unrecoverable; the repeater cannot restore them.
 
 Ask your user where they want a protected recovery copy kept, then end your turn. Do not upload anything or choose a backup destination for them; wait for their answer in a new message.
 

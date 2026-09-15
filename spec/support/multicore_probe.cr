@@ -77,11 +77,8 @@ def burst(count : Int32, concurrency : Int32, &request : -> Nil)
   }
 end
 
-def admit_ship(root : String, origin : String, ship : String,
-               passphrase : String) : Tinrelay::Client
-  Tinrelay::Client.join(
-    File.join(root, "#{ship}.keyring"), origin, ship, passphrase
-  )
+def admit_ship(root : String, origin : String, ship : String) : Tinrelay::Client
+  Tinrelay::Client.join(File.join(root, "#{ship}.keyring"), origin, ship)
 end
 
 def connect_ships(root : String, first : Tinrelay::Client,
@@ -142,20 +139,17 @@ begin
   spawn { server.listen }
   Fiber.yield
   origin = "http://127.0.0.1:#{address.port}"
-
-  passphrase = "multicore probe passphrase"
   alpha = Tinrelay::Client.join(
-    File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-  )
-  beta = admit_ship(root, origin, "beta", passphrase)
+    File.join(root, "alpha.keyring"), origin, "alpha")
+  beta = admit_ship(root, origin, "beta")
   connect_ships(root, alpha, beta)
-  gamma = admit_ship(root, origin, "gamma", passphrase)
+  gamma = admit_ship(root, origin, "gamma")
   connect_ships(root, alpha, gamma)
   capture = ProbeCaptureRemote.new(origin)
-  composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)
+  composer = Tinrelay::Client.new(beta.keyring, capture)
   writes.times { |index| composer.send("steward@alpha", "probe #{index}", "caller") }
   direct_capture = ProbeCaptureRemote.new(origin)
-  Tinrelay::Client.new(gamma.keyring, passphrase, direct_capture)
+  Tinrelay::Client.new(gamma.keyring, direct_capture)
     .send("steward@alpha", "direct probe", "caller")
 
   spool = Tinrelay::Spool.new(File.join(root, "inbox"))

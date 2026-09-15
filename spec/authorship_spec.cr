@@ -17,7 +17,7 @@ module TinrelayAuthorshipSpec
   def self.capture(sender : Tinrelay::Client, origin : String,
                    body : String) : Tinrelay::SignedRelayEnvelope
     remote = AuthorshipCaptureRemote.new(origin)
-    Tinrelay::Client.new(sender.keyring, sender.passphrase, remote)
+    Tinrelay::Client.new(sender.keyring, remote)
       .send("steward@alpha", body, "caller")
     remote.captured.not_nil!
   end
@@ -93,12 +93,10 @@ describe "protocol-1 ship authorship" do
 
   it "rejects changed outer route or ciphertext before destination decryption" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "outer authorship boundary"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       original = TinrelayAuthorshipSpec.capture(beta, origin, "sealed emission")
 
@@ -120,12 +118,10 @@ describe "protocol-1 ship authorship" do
 
   it "rejects invalid or mismatched signed plaintext without transmission spooling" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "inner authorship boundary"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
@@ -178,16 +174,14 @@ describe "protocol-1 ship authorship" do
 
   it "keeps signed plaintext verifiable after relay erasure and receive-key retirement" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "durable authorship evidence"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
       delta = TinrelaySpec.admit_contact(
-        root, origin, "delta", passphrase, beta
+        root, origin, "delta", beta
       )
       beta_spool = Tinrelay::Spool.new(File.join(root, "beta-inbox"))
       delta.send("steward@beta", "establish delta")
@@ -197,7 +191,7 @@ describe "protocol-1 ship authorship" do
       beta_spool.routed(beta_established.local_id)
 
       gamma = TinrelaySpec.admit_contact(
-        root, origin, "gamma", passphrase, alpha
+        root, origin, "gamma", alpha
       )
       gamma.send("steward@alpha", "establish gamma")
       gamma_established = alpha.radio_wait(spool, hold_seconds: 0)

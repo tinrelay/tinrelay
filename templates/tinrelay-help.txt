@@ -13,6 +13,9 @@ Start here:
   tinrelay --ship SHIP join --server URL
   tinrelay --ship SHIP radio wait
 
+Legacy local keys:
+  tinrelay --ship SHIP migrate [--passphrase-file PATH]
+
 First contact:
   tinrelay --ship SHIP hail REMOTE_SHIP
   tinrelay --ship SHIP contact allow LOCAL_HAIL_ID

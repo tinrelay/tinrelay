@@ -2,11 +2,10 @@ require "./spec_helper"
 
 module TinrelayPermanentMetadataSpec
   def self.seed_owner_history(api : Tinrelay::API, client : Tinrelay::Client,
-                              passphrase : String,
                               revoked_at : Array(Int64?)) : Int32
     return 1 if revoked_at.empty?
     ship = client.keyring.data.ship
-    public_key = Tinrelay::Crypto.unb64(client.keyring.owner(passphrase).key.public_key)
+    public_key = Tinrelay::Crypto.unb64(client.keyring.owner.key.public_key)
     api.database.db.transaction do |transaction|
       connection = transaction.connection
       connection.exec(
@@ -35,12 +34,12 @@ module TinrelayPermanentMetadataSpec
     end.not_nil!.to_i
   end
 
-  def self.owner_rotation(client : Tinrelay::Client, passphrase : String,
+  def self.owner_rotation(client : Tinrelay::Client,
                           current_generation : Int32, admin_generation : Int64,
                           now : Int64) : Tinrelay::OwnerRotation
     keys = Tinrelay::Crypto.signing_keypair
     public_key = Tinrelay::Crypto.b64(keys.public_key)
-    owner = client.keyring.owner(passphrase).key
+    owner = client.keyring.owner.key
     bytes = Tinrelay::Canonical.fields(
       "tinrelay-owner-rotation-v1", client.keyring.data.ship,
       (current_generation + 1).to_s, public_key
@@ -64,12 +63,12 @@ module TinrelayPermanentMetadataSpec
   end
 
   def self.seed_radio_history(api : Tinrelay::API, client : Tinrelay::Client,
-                              passphrase : String, owner_generation : Int32,
+                              owner_generation : Int32,
                               revoked_at : Array(Int64?)) : Int32
     return 1 if revoked_at.empty?
     ship = client.keyring.data.ship
     radio = client.keyring.data.radio!
-    owner = client.keyring.owner(passphrase).key
+    owner = client.keyring.owner.key
     api.database.db.transaction do |transaction|
       connection = transaction.connection
       connection.exec(
@@ -113,12 +112,12 @@ module TinrelayPermanentMetadataSpec
     end.not_nil!.to_i
   end
 
-  def self.relationship_close(client : Tinrelay::Client, passphrase : String,
+  def self.relationship_close(client : Tinrelay::Client,
                               peer : String, radio_generation : Int32,
                               owner_generation : Int32, admin_generation : Int64,
                               now : Int64) : Tinrelay::RelationshipClose
     prior = client.keyring.data.radio!
-    owner = client.keyring.owner(passphrase).key
+    owner = client.keyring.owner.key
     signing = Tinrelay::Crypto.signing_keypair
     encryption = Tinrelay::Crypto.box_keypair
     certificate = Tinrelay::ShipRadioCertificate.new(
@@ -167,9 +166,8 @@ end
 describe "permanent relay metadata capacity" do
   it "bounds one ship before it exhausts shared permanent capacity" do
     TinrelaySpec.with_server(permanent_metadata_limit: 14_i64) do |root, origin, api|
-      passphrase = "permanent metadata fairness evidence"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
 
       Tinrelay::Store::MAX_OWNER_ROTATIONS_PER_DAY.times do |index|
         alpha.rotate_owner.should eq(index + 2)
@@ -177,7 +175,7 @@ describe "permanent relay metadata capacity" do
       expect_raises(Tinrelay::RotationLimited) { alpha.rotate_owner }
 
       beta.rotate_owner.should eq(2)
-      TinrelaySpec.admit(root, origin, "gamma", passphrase)
+      TinrelaySpec.admit(root, origin, "gamma")
       api.store.permanent_metadata_usage.should eq(14)
       api.database.db.scalar(
         "SELECT COUNT(*) FROM ship_owner_keys WHERE ship = 'alpha'"
@@ -187,29 +185,28 @@ describe "permanent relay metadata capacity" do
 
   it "limits recent owner rotations by timestamp rank without a lifetime ceiling" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "owner rotation window evidence"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
       now = 100_000_i64
       cutoff = now - Tinrelay::Store::ROTATION_WINDOW_SECONDS
       old_history = Array(Int64?).new(300, cutoff)
       generation = TinrelayPermanentMetadataSpec.seed_owner_history(
-        api, alpha, passphrase, old_history
+        api, alpha, old_history
       )
       api.store.rotate_owner(
         TinrelayPermanentMetadataSpec.owner_rotation(
-          alpha, passphrase, generation, 1_i64, now
+          alpha, generation, 1_i64, now
         ),
         now
       )
 
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      beta = TinrelaySpec.admit(root, origin, "beta")
       recent = [cutoff + 40, cutoff + 10, cutoff + 10, cutoff + 30, cutoff + 20]
         .map(&.as(Int64?))
       beta_generation = TinrelayPermanentMetadataSpec.seed_owner_history(
-        api, beta, passphrase, recent
+        api, beta, recent
       )
       request = TinrelayPermanentMetadataSpec.owner_rotation(
-        beta, passphrase, beta_generation, 1_i64, now
+        beta, beta_generation, 1_i64, now
       )
       limited = expect_raises(Tinrelay::RotationLimited) do
         api.store.rotate_owner(request, now)
@@ -231,14 +228,13 @@ describe "permanent relay metadata capacity" do
 
   it "orders a backward-clock rotation window by server time and rejects NULL history" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "backward clock rotation evidence"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
       timestamps = [100_i64, 90_i64, 80_i64, 70_i64, 60_i64].map(&.as(Int64?))
       generation = TinrelayPermanentMetadataSpec.seed_owner_history(
-        api, alpha, passphrase, timestamps
+        api, alpha, timestamps
       )
       request = TinrelayPermanentMetadataSpec.owner_rotation(
-        alpha, passphrase, generation, 1_i64, 50_i64
+        alpha, generation, 1_i64, 50_i64
       )
       limited = expect_raises(Tinrelay::RotationLimited) do
         api.store.rotate_owner(request, 50_i64)
@@ -247,12 +243,12 @@ describe "permanent relay metadata capacity" do
         Tinrelay::Store::ROTATION_WINDOW_SECONDS + 20
       )
 
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      beta = TinrelaySpec.admit(root, origin, "beta")
       beta_generation = TinrelayPermanentMetadataSpec.seed_owner_history(
-        api, beta, passphrase, [nil]
+        api, beta, [nil]
       )
       beta_request = TinrelayPermanentMetadataSpec.owner_rotation(
-        beta, passphrase, beta_generation, 1_i64, 50_i64
+        beta, beta_generation, 1_i64, 50_i64
       )
       expect_raises(Tinrelay::Error, /revocation time/) do
         api.store.rotate_owner(beta_request, 50_i64)
@@ -262,14 +258,13 @@ describe "permanent relay metadata capacity" do
 
   it "returns exact timed evidence and no retry time for corrupt rotation history" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "rotation limit response evidence"
       now = Time.utc.to_unix
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
       generation = TinrelayPermanentMetadataSpec.seed_owner_history(
-        api, alpha, passphrase, Array(Int64?).new(4, now - 10)
+        api, alpha, Array(Int64?).new(4, now - 10)
       )
       request = TinrelayPermanentMetadataSpec.owner_rotation(
-        alpha, passphrase, generation, 1_i64, now
+        alpha, generation, 1_i64, now
       )
       response = TinrelayPermanentMetadataSpec.post(
         origin, "/v1/owners/rotate", request.to_json
@@ -282,12 +277,12 @@ describe "permanent relay metadata capacity" do
       evidence["error"].as_s.should eq("rotation_limited")
       evidence["retry_after_seconds"].as_i64.should eq(retry_after)
 
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      beta = TinrelaySpec.admit(root, origin, "beta")
       beta_generation = TinrelayPermanentMetadataSpec.seed_owner_history(
-        api, beta, passphrase, [nil]
+        api, beta, [nil]
       )
       invalid = TinrelayPermanentMetadataSpec.owner_rotation(
-        beta, passphrase, beta_generation, 1_i64, Time.utc.to_unix
+        beta, beta_generation, 1_i64, Time.utc.to_unix
       )
       corrupt = TinrelayPermanentMetadataSpec.post(
         origin, "/v1/owners/rotate", invalid.to_json
@@ -299,17 +294,16 @@ describe "permanent relay metadata capacity" do
 
   it "keeps owner and radio rotation budgets independent and mutation-free" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "independent radio rotation budget"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
       now = 200_000_i64
       radio_generation = TinrelayPermanentMetadataSpec.seed_radio_history(
-        api, alpha, passphrase, 1,
+        api, alpha, 1,
         Array(Int64?).new(Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY, now - 1)
       )
       closure = TinrelayPermanentMetadataSpec.relationship_close(
-        alpha, passphrase, "beta", radio_generation, 1, 1_i64, now
+        alpha, "beta", radio_generation, 1, 1_i64, now
       )
       limited = expect_raises(Tinrelay::RotationLimited) do
         api.store.close_relationship(closure, now)
@@ -329,28 +323,27 @@ describe "permanent relay metadata capacity" do
       ).should eq("active")
 
       owner_request = TinrelayPermanentMetadataSpec.owner_rotation(
-        alpha, passphrase, 1, 1_i64, now
+        alpha, 1, 1_i64, now
       )
       api.store.rotate_owner(owner_request, now)
     end
 
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "independent owner rotation budget"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
       now = 300_000_i64
       cutoff = now - Tinrelay::Store::ROTATION_WINDOW_SECONDS
       owner_generation = TinrelayPermanentMetadataSpec.seed_owner_history(
-        api, alpha, passphrase,
+        api, alpha,
         Array(Int64?).new(Tinrelay::Store::MAX_OWNER_ROTATIONS_PER_DAY, cutoff + 1)
       )
       radio_generation = TinrelayPermanentMetadataSpec.seed_radio_history(
-        api, alpha, passphrase, owner_generation,
+        api, alpha, owner_generation,
         Array(Int64?).new(Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY - 1, now - 1)
       )
       closure = TinrelayPermanentMetadataSpec.relationship_close(
-        alpha, passphrase, "beta", radio_generation,
+        alpha, "beta", radio_generation,
         owner_generation, 1_i64, now
       )
       api.store.close_relationship(closure, now)
@@ -403,11 +396,10 @@ describe "permanent relay metadata capacity" do
 
   it "rejects growing claims while established correspondence remains writable" do
     TinrelaySpec.with_server(permanent_metadata_limit: 3_i64) do |root, origin, api|
-      passphrase = "permanent metadata claim capacity"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
 
       expect_raises(Tinrelay::Unavailable) do
-        TinrelaySpec.admit(root, origin, "beta", passphrase)
+        TinrelaySpec.admit(root, origin, "beta")
       end
       api.database.db.scalar("SELECT COUNT(*) FROM registration_events").should eq(1_i64)
       api.store.permanent_metadata_usage.should eq(3)
@@ -424,9 +416,8 @@ describe "permanent relay metadata capacity" do
 
   it "charges owner and radio generations but not an existing relationship update" do
     TinrelaySpec.with_server(permanent_metadata_limit: 7_i64) do |root, origin, api|
-      passphrase = "permanent metadata generation capacity"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
 
       api.store.permanent_metadata_usage.should eq(7)
@@ -461,9 +452,8 @@ describe "permanent relay metadata capacity" do
 
   it "leaves a hail unallowed when a new relationship would exceed capacity" do
     TinrelaySpec.with_server(permanent_metadata_limit: 6_i64) do |root, origin, api|
-      passphrase = "permanent metadata relationship capacity"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       spool = Tinrelay::Spool.new(File.join(root, "beta-inbox"))
 
       alpha.hail("beta")
@@ -489,9 +479,8 @@ describe "permanent relay metadata capacity" do
 
   it "charges transitioning relationships until cleanup physically removes them" do
     TinrelaySpec.with_server(permanent_metadata_limit: 8_i64) do |root, origin, api|
-      passphrase = "permanent metadata transition cleanup"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
 
       alpha.close_contact("beta").should eq(2)
@@ -506,9 +495,8 @@ describe "permanent relay metadata capacity" do
 
   it "rejects a signed wrong-sized next owner key without consuming history" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "permanent metadata owner key length"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      owner = alpha.keyring.owner(passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      owner = alpha.keyring.owner
       next_public = Tinrelay::Crypto.b64(Bytes.new(40_000, 1_u8))
       rotation_bytes = Tinrelay::Canonical.fields(
         "tinrelay-owner-rotation-v1", "alpha", "2", next_public
@@ -560,9 +548,8 @@ describe "permanent relay metadata capacity" do
 
   it "reads a valid identity history beyond the ordinary response ceiling" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "bounded large identity history"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      owner = alpha.keyring.owner(passphrase).key
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      owner = alpha.keyring.owner.key
       previous_secret = Tinrelay::Crypto.unb64(owner.secret_key)
 
       api.database.db.transaction do |transaction|

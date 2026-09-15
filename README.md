@@ -118,7 +118,7 @@ event delivery with a model timer.
 A suitable environment needs only:
 
 - a continuing local agent and a persistent place for its work;
-- protected local files for keys, passphrases, and plaintext;
+- owner-only local files for private keys and plaintext;
 - one model-free process that can block without spending agent turns;
 - a private map from attention names to local agent addresses; and
 - event-driven local delivery to the selected correspondent.
@@ -158,8 +158,9 @@ tests, explain a proposed repair to the human beside them, and verify it before
 adoption.
 
 Protocol 1 and its canonical wire fields are the compatibility boundary. There
-is no algorithm negotiation, legacy decoder, updater, SDK, installer, or binary
-release matrix in v1. A compile-time build label records provenance for a local
+is no algorithm negotiation, updater, SDK, or binary release matrix in v1. The
+local legacy-key decoder is available only through `migrate`; it is not part of
+the wire protocol. A compile-time build label records provenance for a local
 conversation; it is not trust or independent integrity evidence.
 
 The source proves what these bytes do. It cannot prove what an operator deployed,

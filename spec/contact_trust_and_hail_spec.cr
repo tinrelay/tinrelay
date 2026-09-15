@@ -20,13 +20,10 @@ end
 describe "contact trust and content-free hails" do
   it "wakes a parked radio when a hail arrives" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "parked hail test passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = Tinrelay::Client.join(
-        File.join(root, "beta.keyring"), origin, "beta", passphrase
-      )
+        File.join(root, "beta.keyring"), origin, "beta")
       spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
       event = Channel(Tinrelay::RadioEvent).new(1)
       spawn { event.send(alpha.radio_wait(spool, hold_seconds: 5)) }
@@ -39,13 +36,10 @@ describe "contact trust and content-free hails" do
 
   it "establishes first contact from an explicitly allowed hail and pins each ship by TOFU" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "explicit hail trust passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = Tinrelay::Client.join(
-        File.join(root, "beta.keyring"), origin, "beta", passphrase
-      )
+        File.join(root, "beta.keyring"), origin, "beta")
       beta_spool = Tinrelay::Spool.new(File.join(root, "beta-inbox"))
       alpha_spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
 
@@ -96,11 +90,9 @@ describe "contact trust and content-free hails" do
 
   it "delivers a ship-name hail only to fallback without creating contact" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "content free hail passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+        File.join(root, "alpha.keyring"), origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
       hail = beta.hail("alpha")
@@ -122,15 +114,14 @@ describe "contact trust and content-free hails" do
     TinrelaySpec.with_server(
       registration_allowances: TinrelaySpec::OPEN_REGISTRATION_ALLOWANCES
     ) do |root, origin, api|
-      passphrase = "recipient hail attention bound"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       strangers = Array(Tinrelay::Client).new(
         Tinrelay::Store::MAX_UNALLOWED_HAILS_PER_SHIP + 1
       ) do |index|
-        TinrelaySpec.admit(root, origin, "stranger-#{index}", passphrase)
+        TinrelaySpec.admit(root, origin, "stranger-#{index}")
       end
       strangers.first(Tinrelay::Store::MAX_UNALLOWED_HAILS_PER_SHIP).each do |ship|
         ship.hail("alpha")
@@ -164,11 +155,9 @@ describe "contact trust and content-free hails" do
 
   it "counts authenticated invalid-target hails before resolution and keeps their result opaque" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "opaque hail admission passphrase"
       Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+        File.join(root, "alpha.keyring"), origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       Tinrelay::Store::MAX_HAILS_PER_DAY.times do |index|
         started = Time.instant
         hail = beta.hail("absent-#{index}")
@@ -186,16 +175,13 @@ describe "contact trust and content-free hails" do
 
   it "does not persist a rerun after a lost response and later relationship allow" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "post-allow hail rerun passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = Tinrelay::Client.join(
-        File.join(root, "beta.keyring"), origin, "beta", passphrase
-      )
+        File.join(root, "beta.keyring"), origin, "beta")
       spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
       unreliable = Tinrelay::Client.new(
-        beta.keyring, passphrase, LostHailResponseRemote.new(origin, api.store)
+        beta.keyring, LostHailResponseRemote.new(origin, api.store)
       )
 
       expect_raises(Tinrelay::HailAcceptanceUnknown, /lost hail response/) do
@@ -223,15 +209,12 @@ describe "contact trust and content-free hails" do
 
   it "persists the rerun when the first hail never reached durable storage" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "pre-persistence hail rerun passphrase"
       Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = Tinrelay::Client.join(
-        File.join(root, "beta.keyring"), origin, "beta", passphrase
-      )
+        File.join(root, "beta.keyring"), origin, "beta")
       unreliable = Tinrelay::Client.new(
-        beta.keyring, passphrase, LostHailResponseRemote.new(origin)
+        beta.keyring, LostHailResponseRemote.new(origin)
       )
 
       expect_raises(Tinrelay::HailAcceptanceUnknown, /lost hail response/) do

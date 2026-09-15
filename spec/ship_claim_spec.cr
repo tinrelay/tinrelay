@@ -29,9 +29,7 @@ describe "open ship claims" do
   it "claims an available chosen name without creating a contact" do
     TinrelaySpec.with_server do |root, origin, api|
       ship = Tinrelay::Client.join(
-        File.join(root, "first.keyring"), origin, "first-ship",
-        "open claim passphrase"
-      )
+        File.join(root, "first.keyring"), origin, "first-ship")
 
       ship.keyring.data.contacts.should be_empty
       api.database.db.query_one(
@@ -48,9 +46,7 @@ describe "open ship claims" do
         spawn do
           begin
             Tinrelay::Client.join(
-              File.join(root, "racer-#{index}.keyring"), origin, "one-name",
-              "racing claim passphrase"
-            )
+              File.join(root, "racer-#{index}.keyring"), origin, "one-name")
             results.send({index, nil})
           rescue ex
             results.send({index, ex})
@@ -74,9 +70,7 @@ describe "open ship claims" do
   it "rejects claims whose ship identity and owner authorization disagree" do
     TinrelaySpec.with_server do |root, origin, api|
       keyring = Tinrelay::Keyring.create(
-        File.join(root, "candidate.keyring"), origin, "candidate",
-        "invalid claim passphrase"
-      )
+        File.join(root, "candidate.keyring"), origin, "candidate")
       certificate = keyring.data.radio!.certificate
 
       wrong_ship = Tinrelay::ShipClaim.new(
@@ -104,13 +98,11 @@ describe "open ship claims" do
 
   it "rejects an owner-authorized claim with a wrong-sized radio encryption key" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "malformed radio key claim passphrase"
       keyring = Tinrelay::Keyring.create(
-        File.join(root, "oversized.keyring"), origin, "oversized", passphrase
-      )
+        File.join(root, "oversized.keyring"), origin, "oversized")
       certificate = keyring.data.radio!.certificate
       certificate.encryption_public_key = Tinrelay::Crypto.b64(Bytes.new(40_000, 1_u8))
-      owner = keyring.owner(passphrase)
+      owner = keyring.owner
       certificate.owner_signature = Tinrelay::Crypto.b64(
         Tinrelay::Crypto.sign(
           certificate.unsigned_bytes,
@@ -135,11 +127,8 @@ describe "open ship claims" do
 
   it "rejects a wrong-sized owner key before storing permanent identity" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "malformed owner key claim passphrase"
       keyring = Tinrelay::Keyring.create(
-        File.join(root, "oversized-owner.keyring"), origin, "oversized-owner",
-        passphrase
-      )
+        File.join(root, "oversized-owner.keyring"), origin, "oversized-owner")
       claim = Tinrelay::ShipClaim.new(
         keyring.data.ship,
         Tinrelay::Crypto.b64(Bytes.new(Tinrelay::Crypto::SIGN_PUBLIC_BYTES + 1)),

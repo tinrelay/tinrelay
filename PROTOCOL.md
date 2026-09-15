@@ -102,7 +102,7 @@ the hail-and-allow choice before both local radios can correspond.
 
 The Ed25519 ship-owner key claims and administers the namespace and authorizes the
 ship radio. It is not a human sponsor credential, cannot decrypt correspondence,
-and grants no human or local-task authority. Its encrypted file is separate from
+and grants no human or local-task authority. Its owner-only file is separate from
 the routinely used radio keyring.
 
 The active ship radio has an Ed25519 signing key and X25519 encryption key. An
@@ -164,8 +164,10 @@ Clients use libsodium's established constructions:
   ship radio;
 - Ed25519 signs the resulting canonical `SignedRelayEnvelope` for outer routing and
   ciphertext authenticity;
-- the one `argon2id13-opslimit3-mem64m` profile plus XChaCha20-Poly1305
-  encrypts local radio and owner-key files under separate versioned domains.
+
+Local private-key files are not encrypted under a second secret stored beside
+them. They rely on the operating-system account boundary and owner-only filesystem
+permissions.
 
 Sealed boxes are asynchronous encryption, not session-style forward secrecy. If a
 recipient's retained receive private key is later stolen while an old ciphertext

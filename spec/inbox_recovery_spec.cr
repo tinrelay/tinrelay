@@ -82,20 +82,18 @@ describe "inbox recovery transitions" do
   it "turns changed signed words under a directly delivered ID " +
      "into content-free conflict evidence" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "direct duplicate conflict passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       capture = InboxCaptureRemote.new(origin)
-      Tinrelay::Client.new(beta.keyring, passphrase, capture)
+      Tinrelay::Client.new(beta.keyring, capture)
         .send("steward@alpha", "first signed words", "caller")
       original = capture.captured.first
       changed = TinrelayInboxSpec.changed_body(beta, alpha, original, "different signed words")
       remote = InboxSequenceRemote.new(origin, [original, changed])
-      receiver = Tinrelay::Client.new(alpha.keyring, passphrase, remote)
+      receiver = Tinrelay::Client.new(alpha.keyring, remote)
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
       accepted = receiver.radio_wait(spool, hold_seconds: 0)
@@ -120,20 +118,18 @@ describe "inbox recovery transitions" do
 
   it "never attributes a sender when a relay-supplied outer signature is invalid" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "unverified rejection passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       capture = InboxCaptureRemote.new(origin)
-      Tinrelay::Client.new(beta.keyring, passphrase, capture)
+      Tinrelay::Client.new(beta.keyring, capture)
         .send("steward@alpha", "must remain sealed", "caller")
       forged = capture.captured.first
       forged.signature = Tinrelay::Crypto.b64(Tinrelay::Crypto.random(64))
       receiver = Tinrelay::Client.new(
-        alpha.keyring, passphrase, InboxSequenceRemote.new(origin, [forged])
+        alpha.keyring, InboxSequenceRemote.new(origin, [forged])
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
@@ -150,19 +146,17 @@ describe "inbox recovery transitions" do
 
   it "keeps signed record bytes immutable and surfaces pending work past corrupt routed evidence" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "immutable local history passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       capture = InboxCaptureRemote.new(origin)
-      composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)
+      composer = Tinrelay::Client.new(beta.keyring, capture)
       composer.send("steward@alpha", "old immutable evidence", "caller")
       composer.send("steward@alpha", "new pending work", "caller")
       receiver = Tinrelay::Client.new(
-        alpha.keyring, passphrase,
+        alpha.keyring,
         InboxSequenceRemote.new(origin, capture.captured.dup)
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
@@ -187,12 +181,10 @@ describe "inbox recovery transitions" do
 
   it "rejects a frozen ship as a new transmission sender without losing retry evidence" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "frozen sender passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       beta.ship_change("freeze")
 

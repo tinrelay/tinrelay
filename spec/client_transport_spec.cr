@@ -277,13 +277,11 @@ describe Tinrelay::Remote do
     begin
       maintenance = %({"error":"maintenance","back_at":null})
       TinrelayClientTransportSpec.with_response(503, maintenance) do |origin|
-        passphrase = "maintenance ambiguity test passphrase"
         keyring = Tinrelay::Keyring.create(
-          File.join(root, "keyring"), origin, "alpha", passphrase
-        )
+          File.join(root, "keyring"), origin, "alpha")
         outbox = Tinrelay::Outbox.new(File.join(root, "outbox"))
         client = Tinrelay::Client.new(
-          keyring, passphrase, Tinrelay::Remote.new(origin)
+          keyring, Tinrelay::Remote.new(origin)
         )
 
         failure = expect_raises(Tinrelay::AcceptanceUnknown) do

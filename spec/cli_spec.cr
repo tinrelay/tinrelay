@@ -77,11 +77,9 @@ describe "tinrelay send CLI input" do
     TinrelaySpec.with_server do |root, origin, _api|
       home = File.join(root, "home")
       paths = Tinrelay::LocalPaths.new("alpha", home)
-      passphrase = "CLI stdin integration passphrase"
       client = Tinrelay::Client.join(
-        paths.keyring, origin, "alpha", passphrase, paths.owner_key
+        paths.keyring, origin, "alpha", paths.owner_key
       )
-      File.write(paths.passphrase, passphrase, perm: 0o600)
 
       status, output, error = TinrelayCliSpec.run(
         ["send", "@alpha", "--ship", "alpha"],
@@ -111,7 +109,7 @@ describe "tinrelay send CLI input" do
     FileUtils.rm_r(root) if root && Dir.exists?(root)
   end
 
-  it "rejects body and passphrase sharing stdin before reading either" do
+  it "rejects the legacy passphrase flag on ordinary commands before reading stdin" do
     root = TinrelaySpec.temporary_root
     status, error = TinrelayCliSpec.run_without_eof(
       ["send", "@alpha", "--passphrase-file", "-", "--ship", "alpha"],
@@ -120,20 +118,20 @@ describe "tinrelay send CLI input" do
 
     status.exit_code.should eq(2)
     JSON.parse(error)["message"].as_s.should eq(
-      "transmission body and passphrase cannot both read stdin"
+      "unexpected arguments: --passphrase-file -"
     )
   ensure
     FileUtils.rm_r(root) if root && Dir.exists?(root)
   end
 
-  it "resolves the sender passphrase before reading the transmission body" do
+  it "resolves the sender keyring before reading the transmission body" do
     root = TinrelaySpec.temporary_root
     status, error = TinrelayCliSpec.run_without_eof(
       ["send", "@alpha", "--ship", "alpha"], root
     )
 
     status.exit_code.should eq(2)
-    JSON.parse(error)["message"].as_s.should contain("passphrase file not found")
+    JSON.parse(error)["message"].as_s.should contain("keyring not found")
   ensure
     FileUtils.rm_r(root) if root && Dir.exists?(root)
   end
@@ -169,14 +167,11 @@ describe "tinrelay nested contact commands" do
     TinrelaySpec.with_server do |root, origin, api|
       home = File.join(root, "home")
       paths = Tinrelay::LocalPaths.new("beta", home)
-      passphrase = "CLI contact allow passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = Tinrelay::Client.join(
-        paths.keyring, origin, "beta", passphrase, paths.owner_key
+        paths.keyring, origin, "beta", paths.owner_key
       )
-      File.write(paths.passphrase, passphrase, perm: 0o600)
       alpha.hail("beta")
       event = beta.radio_wait(Tinrelay::Spool.new(paths.spool), hold_seconds: 0)
 
@@ -215,11 +210,9 @@ describe "tinrelay nested owner commands" do
     TinrelaySpec.with_server do |root, origin, _api|
       home = File.join(root, "home")
       paths = Tinrelay::LocalPaths.new("alpha", home)
-      passphrase = "CLI owner rotate passphrase"
       Tinrelay::Client.join(
-        paths.keyring, origin, "alpha", passphrase, paths.owner_key
+        paths.keyring, origin, "alpha", paths.owner_key
       )
-      File.write(paths.passphrase, passphrase, perm: 0o600)
 
       status, output, error = TinrelayCliSpec.run(
         ["--ship", "alpha", "owner", "rotate"], "", home
@@ -230,6 +223,80 @@ describe "tinrelay nested owner commands" do
       result["state"].as_s.should eq("rotated")
       result["owner_generation"].as_i.should eq(2)
     end
+  end
+end
+
+describe "tinrelay local key migration" do
+  it "converts the canonical legacy files and removes their adjacent passphrase" do
+    root = TinrelaySpec.temporary_root
+    home = File.join(root, "home")
+    paths = Tinrelay::LocalPaths.new("alpha", home)
+    keyring = Tinrelay::Keyring.create(
+      paths.keyring, "https://relay.example", "alpha", paths.owner_key
+    )
+    identity = keyring.data.to_json
+    TinrelaySpec::LegacyKeyFiles.wrap(keyring, "legacy passphrase")
+    File.write(paths.legacy_passphrase, "legacy passphrase\n", perm: 0o600)
+
+    status, output, error = TinrelayCliSpec.run(
+      ["--ship", "alpha", "migrate"], "", home
+    )
+
+    status.success?.should be_true
+    error.should be_empty
+    result = JSON.parse(output)
+    result["state"].as_s.should eq("migrated")
+    result["passphrase_removed"].as_bool.should be_true
+    File.exists?(paths.legacy_passphrase).should be_false
+    Tinrelay::Keyring.load(paths.keyring, paths.owner_key).data.to_json.should eq(identity)
+  ensure
+    FileUtils.rm_r(root) if root && Dir.exists?(root)
+  end
+
+  it "removes an adjacent passphrase left after key conversion" do
+    root = TinrelaySpec.temporary_root
+    home = File.join(root, "home")
+    paths = Tinrelay::LocalPaths.new("alpha", home)
+    Tinrelay::Keyring.create(
+      paths.keyring, "https://relay.example", "alpha", paths.owner_key
+    )
+    File.write(paths.legacy_passphrase, "obsolete passphrase\n", perm: 0o600)
+
+    status, output, error = TinrelayCliSpec.run(
+      ["--ship", "alpha", "migrate"], "", home
+    )
+
+    status.success?.should be_true
+    error.should be_empty
+    result = JSON.parse(output)
+    result["state"].as_s.should eq("current")
+    result["passphrase_removed"].as_bool.should be_true
+    File.exists?(paths.legacy_passphrase).should be_false
+  ensure
+    FileUtils.rm_r(root) if root && Dir.exists?(root)
+  end
+
+  it "does not remove a caller-supplied legacy passphrase file" do
+    root = TinrelaySpec.temporary_root
+    home = File.join(root, "home")
+    paths = Tinrelay::LocalPaths.new("alpha", home)
+    keyring = Tinrelay::Keyring.create(
+      paths.keyring, "https://relay.example", "alpha", paths.owner_key
+    )
+    TinrelaySpec::LegacyKeyFiles.wrap(keyring, "legacy passphrase")
+    supplied = File.join(root, "migration-passphrase")
+    File.write(supplied, "legacy passphrase\n", perm: 0o600)
+
+    status, output, error = TinrelayCliSpec.run(
+      ["--ship", "alpha", "migrate", "--passphrase-file", supplied], "", home
+    )
+
+    status.success?.should be_true
+    error.should be_empty
+    JSON.parse(output)["passphrase_removed"].as_bool.should be_false
+    File.exists?(supplied).should be_true
+  ensure
+    FileUtils.rm_r(root) if root && Dir.exists?(root)
   end
 end
 

@@ -26,16 +26,14 @@ end
 describe "the socially blind repeater boundary" do
   it "retains one exact encrypted envelope when acceptance is unknown" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "outbox response loss passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       outbox = Tinrelay::Outbox.new(File.join(root, "outbox"))
       unreliable_remote = AcceptThenDropRemote.new(origin, api.store, outbox.directory)
-      unreliable = Tinrelay::Client.new(beta.keyring, passphrase, unreliable_remote)
+      unreliable = Tinrelay::Client.new(beta.keyring, unreliable_remote)
 
       failure = expect_raises(Tinrelay::AcceptanceUnknown, /acceptance is unknown/) do
         unreliable.send("steward@alpha", "response may have been lost", outbox: outbox)
@@ -74,14 +72,11 @@ describe "the socially blind repeater boundary" do
 
   it "allows signed self/contact inspection without a public ship-name oracle" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "protected inspection passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
 
       gamma = Tinrelay::Client.join(
-        File.join(root, "gamma.keyring"), origin, "gamma", passphrase
-      )
+        File.join(root, "gamma.keyring"), origin, "gamma")
 
       unrelated = expect_raises(Tinrelay::NotFound) { gamma.who("alpha") }
       nonexistent = expect_raises(Tinrelay::NotFound) { gamma.who("not-claimed") }

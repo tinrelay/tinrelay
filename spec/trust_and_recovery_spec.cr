@@ -214,14 +214,12 @@ end
 describe "trust and recovery transitions" do
   it "uses the pinned owner anchor and certificate after first contact" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "pinned ownership anchor passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+        File.join(root, "alpha.keyring"), origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
       capture = TrustCaptureRemote.new(origin)
-      Tinrelay::Client.new(beta.keyring, passphrase, capture)
+      Tinrelay::Client.new(beta.keyring, capture)
         .send("steward@alpha", "pinned identity survives registry substitution")
       envelope = capture.envelopes.first
 
@@ -283,7 +281,7 @@ describe "trust and recovery transitions" do
         end
       end
       receiver = Tinrelay::Client.new(
-        alpha.keyring, passphrase,
+        alpha.keyring,
         OwnerSubstitutionRemote.new(origin, envelope, substituted_card)
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
@@ -297,18 +295,16 @@ describe "trust and recovery transitions" do
 
   it "retains exact transmission attempts across every unavailable response" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "unavailable ambiguity passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
 
       [nil, api.store].each_with_index do |accepted_store, index|
         transmission_box = Tinrelay::Outbox.new(File.join(root, "tx-outbox-#{index}"))
         unreliable = Tinrelay::Client.new(
-          beta.keyring, passphrase,
+          beta.keyring,
           UnavailableSubmissionRemote.new(origin, accepted_store)
         )
         failure = expect_raises(Tinrelay::AcceptanceUnknown) do
@@ -323,10 +319,8 @@ describe "trust and recovery transitions" do
 
   it "returns one unauthenticated response for guessed radio and owner state" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "generic authentication boundary passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       radio_payload = Tinrelay::Canonical.fields("0", "", "", "")
       radio_cases = [
         TrustRecoverySpec.bad_radio_auth("absent", 1, radio_payload),
@@ -353,14 +347,12 @@ describe "trust and recovery transitions" do
 
   it "reuses one pending radio identity across failure, restart, and lost success" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "single pending radio identity passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
       %w(beta gamma delta).each do |ship|
         peer = TinrelaySpec.admit_contact(
-          root, origin, ship, passphrase, alpha
+          root, origin, ship, alpha
         )
         peer.send("steward@alpha", "establish #{ship}")
         event = alpha.radio_wait(spool, hold_seconds: 0)
@@ -369,7 +361,7 @@ describe "trust and recovery transitions" do
 
       before_acceptance = AmbiguousRelationshipRemote.new(origin)
       interrupted = Tinrelay::Client.new(
-        alpha.keyring, passphrase, before_acceptance
+        alpha.keyring, before_acceptance
       )
       expect_raises(Tinrelay::Unavailable) do
         interrupted.close_contact("beta")
@@ -377,10 +369,10 @@ describe "trust and recovery transitions" do
       pending_certificate = interrupted.keyring.data.pending_radio.not_nil!
         .certificate.to_json
 
-      restarted_keyring = Tinrelay::Keyring.load(alpha.keyring.path, passphrase)
+      restarted_keyring = Tinrelay::Keyring.load(alpha.keyring.path)
       after_acceptance = AmbiguousRelationshipRemote.new(origin, api.store)
       restarted = Tinrelay::Client.new(
-        restarted_keyring, passphrase, after_acceptance
+        restarted_keyring, after_acceptance
       )
       restarted.close_contact("beta").should eq(2)
       after_acceptance.certificates.should eq([pending_certificate])
@@ -389,7 +381,7 @@ describe "trust and recovery transitions" do
       restarted.keyring.data.radios.count(&.generation.==(2)).should eq(1)
 
       rejected = Tinrelay::Client.new(
-        restarted.keyring, passphrase,
+        restarted.keyring,
         RejectedRelationshipRemote.new(origin)
       )
       expect_raises(Tinrelay::Conflict, /definite rejection/) do
@@ -401,14 +393,12 @@ describe "trust and recovery transitions" do
 
   it "clears only a fresh radio after exact timed refusal" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "fresh timed relationship refusal"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
-      TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
+        File.join(root, "alpha.keyring"), origin, "alpha")
+      TinrelaySpec.admit_contact(root, origin, "beta", alpha)
 
       timed = Tinrelay::Client.new(
-        alpha.keyring, passphrase, TimedRelationshipRemote.new(origin)
+        alpha.keyring, TimedRelationshipRemote.new(origin)
       )
       expect_raises(Tinrelay::RotationLimited) do
         timed.close_contact("beta")
@@ -418,7 +408,7 @@ describe "trust and recovery transitions" do
       timed.rotate_owner.should eq(2)
 
       generic = Tinrelay::Client.new(
-        timed.keyring, passphrase, GenericLimitedRelationshipRemote.new(origin)
+        timed.keyring, GenericLimitedRelationshipRemote.new(origin)
       )
       expect_raises(Tinrelay::Unavailable) do
         generic.close_contact("beta")
@@ -429,42 +419,38 @@ describe "trust and recovery transitions" do
 
   it "retains a reused radio through timed and raced definite refusals" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "reused timed relationship refusal"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
-      TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
+        File.join(root, "alpha.keyring"), origin, "alpha")
+      TinrelaySpec.admit_contact(root, origin, "beta", alpha)
       ambiguous = AmbiguousRelationshipRemote.new(origin)
-      first = Tinrelay::Client.new(alpha.keyring, passphrase, ambiguous)
+      first = Tinrelay::Client.new(alpha.keyring, ambiguous)
       expect_raises(Tinrelay::Unavailable) { first.close_contact("beta") }
       pending = first.keyring.data.pending_radio.not_nil!.to_json
 
       retry = Tinrelay::Client.new(
-        first.keyring, passphrase, TimedRelationshipRemote.new(origin)
+        first.keyring, TimedRelationshipRemote.new(origin)
       )
       expect_raises(Tinrelay::RotationLimited) { retry.close_contact("beta") }
       retry.keyring.data.pending_radio.not_nil!.to_json.should eq(pending)
 
       api.store.close_relationship(ambiguous.requests.first)
-      recovered = Tinrelay::Client.new(retry.keyring, passphrase, Tinrelay::Remote.new(origin))
+      recovered = Tinrelay::Client.new(retry.keyring, Tinrelay::Remote.new(origin))
       recovered.sync_radio!.should be_true
       recovered.keyring.data.pending_radio.should be_nil
       recovered.keyring.data.active_radio_generation.should eq(2)
     end
 
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "reused conflict relationship refusal"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
-      TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
+        File.join(root, "alpha.keyring"), origin, "alpha")
+      TinrelaySpec.admit_contact(root, origin, "beta", alpha)
       ambiguous = AmbiguousRelationshipRemote.new(origin)
-      first = Tinrelay::Client.new(alpha.keyring, passphrase, ambiguous)
+      first = Tinrelay::Client.new(alpha.keyring, ambiguous)
       expect_raises(Tinrelay::Unavailable) { first.close_contact("beta") }
       pending = first.keyring.data.pending_radio.not_nil!.to_json
 
       raced = Tinrelay::Client.new(
-        first.keyring, passphrase,
+        first.keyring,
         CommitThenConflictRelationshipRemote.new(
           origin, api.store, ambiguous.requests.first
         )
@@ -472,7 +458,7 @@ describe "trust and recovery transitions" do
       expect_raises(Tinrelay::Conflict) { raced.close_contact("beta") }
       raced.keyring.data.pending_radio.not_nil!.to_json.should eq(pending)
 
-      recovered = Tinrelay::Client.new(raced.keyring, passphrase, Tinrelay::Remote.new(origin))
+      recovered = Tinrelay::Client.new(raced.keyring, Tinrelay::Remote.new(origin))
       recovered.sync_radio!.should be_true
       recovered.keyring.data.pending_radio.should be_nil
     end
@@ -480,15 +466,13 @@ describe "trust and recovery transitions" do
 
   it "clears only a fresh owner identity after exact timed refusal" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "fresh timed owner refusal"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       timed_remote = TimedOwnerRemote.new(origin)
-      timed = Tinrelay::Client.new(alpha.keyring, passphrase, timed_remote)
+      timed = Tinrelay::Client.new(alpha.keyring, timed_remote)
 
       expect_raises(Tinrelay::RotationLimited) { timed.rotate_owner }
-      owner = timed.keyring.owner(passphrase)
+      owner = timed.keyring.owner
       owner.pending_generation.should be_nil
       owner.pending_key.should be_nil
       timed.keyring.data.owner_generation.should eq(1)
@@ -498,50 +482,46 @@ describe "trust and recovery transitions" do
 
   it "reuses and reconciles one uncertain owner identity without another rotation" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "reused timed owner refusal"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       ambiguous = AmbiguousOwnerRemote.new(origin)
-      first = Tinrelay::Client.new(alpha.keyring, passphrase, ambiguous)
+      first = Tinrelay::Client.new(alpha.keyring, ambiguous)
       expect_raises(Tinrelay::Unavailable) { first.rotate_owner }
-      pending = first.keyring.owner(passphrase).pending_key.not_nil!.to_json
+      pending = first.keyring.owner.pending_key.not_nil!.to_json
 
       timed_remote = TimedOwnerRemote.new(origin)
-      retry = Tinrelay::Client.new(first.keyring, passphrase, timed_remote)
+      retry = Tinrelay::Client.new(first.keyring, timed_remote)
       expect_raises(Tinrelay::RotationLimited) { retry.rotate_owner }
       timed_remote.rotations.first.new_public_key.should eq(
         ambiguous.rotations.first.new_public_key
       )
-      retry.keyring.owner(passphrase).pending_key.not_nil!.to_json.should eq(pending)
+      retry.keyring.owner.pending_key.not_nil!.to_json.should eq(pending)
 
       api.store.rotate_owner(ambiguous.rotations.first)
-      recovered = Tinrelay::Client.new(retry.keyring, passphrase, Tinrelay::Remote.new(origin))
+      recovered = Tinrelay::Client.new(retry.keyring, Tinrelay::Remote.new(origin))
       recovered.rotate_owner.should eq(2)
-      recovered.keyring.owner(passphrase).pending_key.should be_nil
+      recovered.keyring.owner.pending_key.should be_nil
       api.database.db.scalar(
         "SELECT COUNT(*) FROM ship_owner_keys WHERE ship = 'alpha'"
       ).should eq(2_i64)
     end
 
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "reused conflict owner refusal"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       ambiguous = AmbiguousOwnerRemote.new(origin)
-      first = Tinrelay::Client.new(alpha.keyring, passphrase, ambiguous)
+      first = Tinrelay::Client.new(alpha.keyring, ambiguous)
       expect_raises(Tinrelay::Unavailable) { first.rotate_owner }
-      pending = first.keyring.owner(passphrase).pending_key.not_nil!.to_json
+      pending = first.keyring.owner.pending_key.not_nil!.to_json
 
       raced = Tinrelay::Client.new(
-        first.keyring, passphrase,
+        first.keyring,
         CommitThenConflictOwnerRemote.new(
           origin, api.store, ambiguous.rotations.first
         )
       )
       raced.rotate_owner.should eq(2)
-      raced.keyring.owner(passphrase).pending_key.should be_nil
+      raced.keyring.owner.pending_key.should be_nil
       raced.keyring.data.owner_generation.should eq(2)
       api.database.db.scalar(
         "SELECT COUNT(*) FROM ship_owner_keys WHERE ship = 'alpha'"
@@ -552,15 +532,13 @@ describe "trust and recovery transitions" do
 
   it "suppresses routed exact retries but still advances to later traffic" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "routed retry suppression passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       capture = TrustCaptureRemote.new(origin)
-      composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)
+      composer = Tinrelay::Client.new(beta.keyring, capture)
       composer.send("steward@alpha", "exactly once pointer")
       composer.send("steward@alpha", "later valid traffic")
       first, later = capture.envelopes
@@ -569,7 +547,7 @@ describe "trust and recovery transitions" do
         Tinrelay::RadioWaitResponse.new(envelope: first),
         Tinrelay::RadioWaitResponse.new(envelope: later),
       ])
-      receiver = Tinrelay::Client.new(alpha.keyring, passphrase, remote)
+      receiver = Tinrelay::Client.new(alpha.keyring, remote)
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
       first_event = receiver.radio_wait(spool, hold_seconds: 0)

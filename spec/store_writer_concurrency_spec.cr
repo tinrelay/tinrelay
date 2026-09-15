@@ -102,7 +102,7 @@ module TinrelayStoreWriterConcurrencySpec
   def self.capture(sender : Tinrelay::Client, origin : String,
                    coordinate : String, body : String) : Tinrelay::SignedRelayEnvelope
     remote = CaptureRemote.new(origin)
-    Tinrelay::Client.new(sender.keyring, sender.passphrase, remote).send(coordinate, body)
+    Tinrelay::Client.new(sender.keyring, remote).send(coordinate, body)
     remote.captured.not_nil!
   end
 
@@ -125,9 +125,8 @@ end
 describe "Store writer admission" do
   it "keeps fallback insertion from invalidating an acknowledgement snapshot" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "writer admission acknowledgement passphrase"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit_contact(root, origin, "beta", alpha)
       first = beta.send("steward@alpha", "waiting for acknowledgement")
       second = TinrelayStoreWriterConcurrencySpec.capture(
         beta, origin, "steward@alpha", "concurrent fallback"

@@ -96,20 +96,6 @@ module Tinrelay
     end
   end
 
-  class EncryptedKeyring
-    include JSON::Serializable
-
-    property format : Int32
-    property kdf : String
-    property salt : String
-    property nonce : String
-    property ciphertext : String
-
-    def initialize(@salt, @nonce, @ciphertext, @format = 1,
-                   @kdf = Crypto::KDF_PROFILE)
-    end
-  end
-
   private class ProvisionalClaimOwner
     include JSON::Serializable
 
@@ -128,34 +114,32 @@ module Tinrelay
     getter owner_path : String
     getter data : KeyringData
 
-    @encrypted_digest : String?
+    @source_digest : String?
 
-    def initialize(@path, @owner_path, @data, @encrypted_digest = nil)
+    def initialize(@path, @owner_path, @data, @source_digest = nil)
     end
 
     def self.create(path : String, server : String, ship : String,
-                    passphrase : String, owner_path : String? = nil,
+                    owner_path : String? = nil,
                     now : Time = Time.utc) : Keyring
       Names.ship!(ship)
-      ensure_passphrase!(passphrase)
       owner_file = owner_path || "#{path}.owner"
       synchronize_path(path) do
         raise Conflict.new("keyring already exists") if File.exists?(path)
         raise Conflict.new("owner key file already exists") if File.exists?(owner_file)
-        create_unlocked(path, server, ship, passphrase, owner_file, now)
+        create_unlocked(path, server, ship, owner_file, now)
       end
     end
 
     def self.prepare_join(path : String, server : String, ship : String,
-                          passphrase : String, owner_path : String? = nil,
+                          owner_path : String? = nil,
                           now : Time = Time.utc) : JoinKeyring
       Names.ship!(ship)
-      ensure_passphrase!(passphrase)
       owner_file = owner_path || "#{path}.owner"
       synchronize_path(path) do |lock|
         if File.exists?(path) || File.exists?(owner_file)
-          keyring = load_unlocked(path, passphrase, owner_file)
-          keyring.owner_unlocked(passphrase)
+          keyring = load_unlocked(path, owner_file)
+          keyring.owner_unlocked
           unless keyring.data.server == server && keyring.data.ship == ship
             raise Unauthorized.new("existing provisional keyring does not match this claim")
           end
@@ -167,7 +151,7 @@ module Tinrelay
           end
           JoinKeyring.new(keyring, nil)
         else
-          keyring = create_unlocked(path, server, ship, passphrase, owner_file, now)
+          keyring = create_unlocked(path, server, ship, owner_file, now)
           token = Ids.uuid
           write_claim_owner(
             lock,
@@ -178,11 +162,11 @@ module Tinrelay
       end
     end
 
-    def finish_join(passphrase : String) : Nil
+    def finish_join : Nil
       self.class.synchronize_path(path) do |lock|
         marker = self.class.read_claim_owner(lock)
-        current = self.class.load_unlocked(path, passphrase, owner_path)
-        current.owner_unlocked(passphrase)
+        current = self.class.load_unlocked(path, owner_path)
+        current.owner_unlocked
         unless current.identity_digest == identity_digest
           raise Conflict.new("provisional ship identity changed during registration")
         end
@@ -192,14 +176,14 @@ module Tinrelay
       end
     end
 
-    def abandon_join(cleanup_token : String, passphrase : String) : Nil
+    def abandon_join(cleanup_token : String) : Nil
       self.class.synchronize_path(path) do |lock|
         marker = self.class.read_claim_owner(lock)
         next unless marker && marker.token == cleanup_token && !marker.shared
         next unless marker.identity_digest == identity_digest
         current = begin
-          loaded = self.class.load_unlocked(path, passphrase, owner_path)
-          loaded.owner_unlocked(passphrase)
+          loaded = self.class.load_unlocked(path, owner_path)
+          loaded.owner_unlocked
           loaded
         rescue
           nil
@@ -211,41 +195,28 @@ module Tinrelay
       end
     end
 
-    def self.load(path : String, passphrase : String,
-                  owner_path : String? = nil) : Keyring
+    def self.load(path : String, owner_path : String? = nil) : Keyring
       synchronize_path(path) do
-        load_unlocked(path, passphrase, owner_path)
+        load_unlocked(path, owner_path)
       end
     end
 
-    protected def self.load_unlocked(path : String, passphrase : String,
+    protected def self.load_unlocked(path : String,
                                      owner_path : String? = nil) : Keyring
-      encoded = File.read(path)
-      load_encoded(path, passphrase, owner_path, encoded)
-    rescue ex : File::NotFoundError
-      raise NotFound.new("keyring not found: #{path}")
+      encoded = read_private(path, "keyring")
+      load_encoded(path, owner_path, encoded)
     end
 
-    protected def self.load_encoded(path : String, passphrase : String,
-                                    owner_path : String?, encoded : String) : Keyring
-      encrypted = EncryptedKeyring.from_json(encoded)
-      raise Invalid.new("unsupported keyring envelope format") unless encrypted.format == 1
-      unless encrypted.kdf == Crypto::KDF_PROFILE
-        raise Invalid.new("unsupported keyring KDF profile")
-      end
-      plaintext = Crypto.decrypt_keyring(
-        Crypto.unb64(encrypted.ciphertext, "keyring ciphertext"),
-        Crypto.unb64(encrypted.salt, "keyring salt"),
-        Crypto.unb64(encrypted.nonce, "keyring nonce"),
-        passphrase
-      )
-      data = KeyringData.from_json(String.new(plaintext))
+    protected def self.load_encoded(path : String, owner_path : String?,
+                                    encoded : String) : Keyring
+      raise MigrationRequired.new if legacy_file?(encoded)
+      data = KeyringData.from_json(encoded)
       raise Invalid.new("unsupported ship keyring format") unless data.format == 2
       new(
         path, owner_path || "#{path}.owner", data,
         Digest::SHA256.hexdigest(encoded)
       )
-    rescue ex : JSON::ParseException
+    rescue ex : JSON::ParseException | JSON::SerializableError
       raise Invalid.new("keyring file is invalid")
     end
 
@@ -255,114 +226,84 @@ module Tinrelay
       )
     end
 
-    def owner(passphrase : String) : OwnerKeyData
+    def owner : OwnerKeyData
       owner = nil.as(OwnerKeyData?)
       self.class.synchronize_path(path) do
-        owner = owner_unlocked(passphrase)
+        owner = owner_unlocked
       end
       owner.not_nil!
     end
 
-    def mutate(passphrase : String, include_owner : Bool = false,
+    def mutate(include_owner : Bool = false,
                & : Keyring, OwnerKeyData? -> T) : T forall T
       result = nil.as(T?)
       self.class.synchronize_path(path) do
-        latest = reload_unlocked(passphrase)
+        latest = reload_unlocked
         unless latest.data.server == data.server && latest.data.ship == data.ship
           raise Unauthorized.new("keyring path now belongs to another ship identity")
         end
-        owner = include_owner ? latest.owner_unlocked(passphrase) : nil
+        owner = include_owner ? latest.owner_unlocked : nil
         before_data = latest.data.to_json
         before_owner = owner.try(&.to_json)
         result = yield latest, owner
-        latest.persist_owner(owner.not_nil!, passphrase) if owner && owner.to_json != before_owner
-        latest.persist(passphrase) if latest.data.to_json != before_data
+        latest.persist_owner(owner.not_nil!) if owner && owner.to_json != before_owner
+        latest.persist if latest.data.to_json != before_data
         @data = latest.data
-        @encrypted_digest = latest.encrypted_digest
+        @source_digest = latest.source_digest
       end
       result.as(T)
     end
 
-    def refresh(passphrase : String) : Keyring
-      mutate(passphrase) { |_latest, _owner| nil }
+    def refresh : Keyring
+      mutate { |_latest, _owner| nil }
       self
     end
 
-    protected def owner_unlocked(passphrase : String) : OwnerKeyData
-      encrypted = EncryptedKeyring.from_json(File.read(owner_path))
-      raise Invalid.new("unsupported owner key envelope format") unless encrypted.format == 1
-      unless encrypted.kdf == Crypto::KDF_PROFILE
-        raise Invalid.new("unsupported owner key KDF profile")
-      end
-      plaintext = Crypto.decrypt_owner_key(
-        Crypto.unb64(encrypted.ciphertext, "owner key ciphertext"),
-        Crypto.unb64(encrypted.salt, "owner key salt"),
-        Crypto.unb64(encrypted.nonce, "owner key nonce"), passphrase
-      )
-      owner = OwnerKeyData.from_json(String.new(plaintext))
-      raise Invalid.new("unsupported owner key format") unless owner.format == 1
-      unless owner.ship == data.ship && owner.generation == data.owner_generation &&
-             owner.key.public_key == data.owner_public_key
-        raise Unauthorized.new("owner key does not match the ship keyring")
-      end
+    protected def owner_unlocked : OwnerKeyData
+      encoded = self.class.read_private(owner_path, "owner key")
+      raise MigrationRequired.new if self.class.legacy_file?(encoded)
+      owner = self.class.load_plain_owner(encoded)
+      self.class.validate_owner!(data, owner)
       owner
-    rescue ex : File::NotFoundError
-      raise NotFound.new("owner key not found: #{owner_path}")
-    rescue ex : JSON::ParseException
+    rescue ex : JSON::ParseException | JSON::SerializableError
       raise Invalid.new("owner key file is invalid")
     end
 
-    protected def persist_owner(owner : OwnerKeyData, passphrase : String) : Nil
-      self.class.ensure_passphrase!(passphrase)
-      salt, nonce, ciphertext = Crypto.encrypt_owner_key(
-        owner.to_json.to_slice, passphrase
-      )
-      encoded = EncryptedKeyring.new(
-        Crypto.b64(salt), Crypto.b64(nonce), Crypto.b64(ciphertext)
-      ).to_pretty_json
-      AtomicPrivateFile.write(owner_path, encoded + '\n')
+    protected def persist_owner(owner : OwnerKeyData) : Nil
+      AtomicPrivateFile.write(owner_path, owner.to_pretty_json + '\n')
     end
 
-    def save(passphrase : String) : Nil
+    def save : Nil
       desired = data.to_json
       self.class.synchronize_path(path) do
-        unless Digest::SHA256.hexdigest(File.read(path)) == encrypted_digest
+        unless Digest::SHA256.hexdigest(File.read(path)) == source_digest
           raise Conflict.new("keyring changed since it was loaded")
         end
         @data = KeyringData.from_json(desired)
-        persist(passphrase)
+        persist
       end
     end
 
-    protected def persist(passphrase : String) : Nil
-      self.class.ensure_passphrase!(passphrase)
-      salt, nonce, ciphertext = Crypto.encrypt_keyring(
-        data.to_json.to_slice, passphrase
-      )
-      encoded = EncryptedKeyring.new(
-        Crypto.b64(salt), Crypto.b64(nonce), Crypto.b64(ciphertext)
-      ).to_pretty_json
-      AtomicPrivateFile.write(path, encoded + '\n')
-      @encrypted_digest = Digest::SHA256.hexdigest(encoded + '\n')
+    protected def persist : Nil
+      encoded = data.to_pretty_json + '\n'
+      AtomicPrivateFile.write(path, encoded)
+      @source_digest = Digest::SHA256.hexdigest(encoded)
     end
 
-    protected def encrypted_digest : String
-      @encrypted_digest || raise(Error.new("keyring has no persisted source"))
+    protected def source_digest : String
+      @source_digest || raise(Error.new("keyring has no persisted source"))
     end
 
-    # The exact encrypted bytes are the cheap freshness token. Most collector
-    # turns can prove their decrypted snapshot is current without repeating the
-    # intentionally expensive KDF; a changed file is decrypted under the lock.
-    private def reload_unlocked(passphrase : String) : Keyring
-      encoded = File.read(path)
-      if Digest::SHA256.hexdigest(encoded) == encrypted_digest
+    # The exact private-file bytes are the cheap freshness token. Most collector
+    # turns can reuse their parsed snapshot; a changed file is reread under the lock.
+    private def reload_unlocked : Keyring
+      encoded = self.class.read_private(path, "keyring")
+      if Digest::SHA256.hexdigest(encoded) == source_digest
         return Keyring.new(
-          path, owner_path, KeyringData.from_json(data.to_json), encrypted_digest
+          path, owner_path, KeyringData.from_json(data.to_json), source_digest
         )
       end
-      self.class.load_encoded(path, passphrase, owner_path, encoded)
-    rescue ex : File::NotFoundError
-      raise NotFound.new("keyring not found: #{path}")
+      self.class.load_encoded(path, owner_path, encoded)
     end
 
     protected def self.synchronize_path(path : String, &)
@@ -383,7 +324,7 @@ module Tinrelay
     end
 
     protected def self.create_unlocked(path : String, server : String,
-                                       ship : String, passphrase : String,
+                                       ship : String,
                                        owner_file : String, now : Time) : Keyring
       owner_keys = Crypto.signing_keypair
       signing_keys = Crypto.signing_keypair
@@ -415,8 +356,8 @@ module Tinrelay
         KeyringData.new(server, ship, owner.public_key, [radio])
       )
       begin
-        keyring.persist_owner(OwnerKeyData.new(ship, 1, owner), passphrase)
-        keyring.persist(passphrase)
+        keyring.persist_owner(OwnerKeyData.new(ship, 1, owner))
+        keyring.persist
       rescue ex
         File.delete(owner_file) if File.exists?(owner_file)
         File.delete(path) if File.exists?(path)
@@ -487,9 +428,37 @@ module Tinrelay
       data.radios.size != before
     end
 
-    def self.ensure_passphrase!(passphrase : String) : Nil
-      if passphrase.bytesize < 12
-        raise Invalid.new("keyring passphrase must contain at least 12 characters")
+    protected def self.legacy_file?(encoded : String) : Bool
+      JSON.parse(encoded).as_h.has_key?("kdf")
+    rescue JSON::ParseException | TypeCastError
+      false
+    end
+
+    protected def self.read_private(path : String, label : String) : String
+      raise NotFound.new("#{label} not found: #{path}") unless File.file?(path)
+      permissions = File.info(path).permissions.value & 0o777
+      if permissions & 0o077 != 0
+        raise Invalid.new("#{label} must not be accessible by group or others")
+      end
+      File.read(path)
+    end
+
+    protected def self.load_plain_keyring(encoded : String) : KeyringData
+      data = KeyringData.from_json(encoded)
+      raise Invalid.new("unsupported ship keyring format") unless data.format == 2
+      data
+    end
+
+    protected def self.load_plain_owner(encoded : String) : OwnerKeyData
+      owner = OwnerKeyData.from_json(encoded)
+      raise Invalid.new("unsupported owner key format") unless owner.format == 1
+      owner
+    end
+
+    protected def self.validate_owner!(data : KeyringData, owner : OwnerKeyData) : Nil
+      unless owner.ship == data.ship && owner.generation == data.owner_generation &&
+             owner.key.public_key == data.owner_public_key
+        raise Unauthorized.new("owner key does not match the ship keyring")
       end
     end
   end

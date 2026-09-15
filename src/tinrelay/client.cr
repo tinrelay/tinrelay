@@ -202,26 +202,25 @@ module Tinrelay
 
     getter keyring : Keyring
     getter remote : Remote
-    getter passphrase : String
 
-    def initialize(@keyring, @passphrase, remote : Remote? = nil)
+    def initialize(@keyring, remote : Remote? = nil)
       @remote = remote || Remote.new(keyring.data.server)
       mutate_keyring { keyring.prune_retired_radios! }
     end
 
     def self.join(keyring_path : String, server : String, ship : String,
-                  passphrase : String, owner_path : String? = nil) : Client
+                  owner_path : String? = nil) : Client
       owner_file = owner_path || "#{keyring_path}.owner"
       prepared = nil.as(JoinKeyring?)
       begin
         prepared = Keyring.prepare_join(
-          keyring_path, server, ship, passphrase, owner_file
+          keyring_path, server, ship, owner_file
         )
         keyring = prepared.keyring
         existing = prepared.cleanup_token.nil?
-        client = new(keyring, passphrase)
+        client = new(keyring)
         if existing && claim_committed?(client, keyring)
-          keyring.finish_join(passphrase)
+          keyring.finish_join
           return client
         end
         claim = ShipClaim.new(
@@ -231,24 +230,24 @@ module Tinrelay
           client.remote.post("/v1/join", claim.to_json)
         rescue ex : Conflict
           if existing && claim_committed?(client, keyring)
-            keyring.finish_join(passphrase)
+            keyring.finish_join
             return client
           end
           raise ex
         end
-        keyring.finish_join(passphrase)
+        keyring.finish_join
         client
       rescue ex : Invalid | NotFound | Conflict | Expired
         if candidate = prepared
           candidate.cleanup_token.try do |token|
-            candidate.keyring.abandon_join(token, passphrase)
+            candidate.keyring.abandon_join(token)
           end
         end
         raise ex
       rescue ex : ProtocolMismatch | RegistrationLimited | RegistrationUnavailable
         if candidate = prepared
           candidate.cleanup_token.try do |token|
-            candidate.keyring.abandon_join(token, passphrase)
+            candidate.keyring.abandon_join(token)
           end
         end
         raise ex
@@ -1316,7 +1315,7 @@ module Tinrelay
         keyring.data.ship, keyring.data.owner_generation,
         admin_generation, Time.utc.to_unix
       )
-      owner = keyring.owner(passphrase)
+      owner = keyring.owner
       auth.signature = Crypto.b64(
         Crypto.sign(auth.signing_bytes(action, payload), Crypto.unb64(owner.key.secret_key))
       )
@@ -1446,18 +1445,18 @@ module Tinrelay
     end
 
     private def refresh_keyring! : Nil
-      keyring.refresh(passphrase)
+      keyring.refresh
     end
 
     private def mutate_keyring(&block : -> T) : T forall T
       current = keyring
       begin
-        current.mutate(passphrase) do |latest, _owner|
+        current.mutate do |latest, _owner|
           @keyring = latest
           block.call
         end
       rescue ex
-        current.refresh(passphrase)
+        current.refresh
         @keyring = current
         raise ex
       end
@@ -1466,12 +1465,12 @@ module Tinrelay
     private def mutate_keyring_with_owner(&block : OwnerKeyData -> T) : T forall T
       current = keyring
       begin
-        current.mutate(passphrase, include_owner: true) do |latest, owner|
+        current.mutate(include_owner: true) do |latest, owner|
           @keyring = latest
           block.call(owner.not_nil!)
         end
       rescue ex
-        current.refresh(passphrase)
+        current.refresh
         @keyring = current
         raise ex
       end

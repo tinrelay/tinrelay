@@ -61,15 +61,13 @@ end
 describe Tinrelay::OutgoingObserver do
   it "emits one bounded plaintext event after an accepted send" do
     TinrelaySpec.with_server do |root, origin, _api|
-      passphrase = "outgoing observer passphrase"
       recipient_ship = "a" * 63
       sender_ship = "b" * 63
       attention_label = "c" * 63
       author_label = "d" * 63
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, recipient_ship, passphrase
-      )
-      beta = TinrelaySpec.admit_contact(root, origin, sender_ship, passphrase, alpha)
+        File.join(root, "alpha.keyring"), origin, recipient_ship)
+      beta = TinrelaySpec.admit_contact(root, origin, sender_ship, alpha)
       body = OutgoingObserverSpec.largest_json_hostile_body(
         sender_ship, recipient_ship, attention_label, author_label
       )
@@ -117,11 +115,9 @@ describe Tinrelay::OutgoingObserver do
 
   it "does not observe a transmission whose acceptance is unknown" do
     TinrelaySpec.with_server do |root, origin, _api|
-      passphrase = "unknown observer passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
-      beta = TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
+        File.join(root, "alpha.keyring"), origin, "alpha")
+      beta = TinrelaySpec.admit_contact(root, origin, "beta", alpha)
       OutgoingObserverSpec.with_listener do |_private_root, socket_path, listener|
         arrived = Channel(Bool).new
         spawn do
@@ -139,7 +135,7 @@ describe Tinrelay::OutgoingObserver do
         )
         observer = Tinrelay::OutgoingObserver.from_config(config_path).not_nil!
         unavailable = Tinrelay::Client.new(
-          beta.keyring, passphrase, ObserverUnavailableRemote.new(origin)
+          beta.keyring, ObserverUnavailableRemote.new(origin)
         )
 
         expect_raises(Tinrelay::AcceptanceUnknown) do
@@ -156,11 +152,9 @@ describe Tinrelay::OutgoingObserver do
 
   it "cannot change an accepted send when its socket is unavailable" do
     TinrelaySpec.with_server do |root, origin, _api|
-      passphrase = "failed observer passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
-      beta = TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
+        File.join(root, "alpha.keyring"), origin, "alpha")
+      beta = TinrelaySpec.admit_contact(root, origin, "beta", alpha)
       private_root = File.join(root, "observer")
       Dir.mkdir(private_root, mode: 0o700)
       config_path = File.join(root, "outgoing-observer.json")

@@ -6,7 +6,7 @@ describe Tinrelay::LocalPaths do
 
     paths.keyring.should eq("/home/caller/.config/tinrelay/harbor/keyring")
     paths.owner_key.should eq("/home/caller/.config/tinrelay/harbor/owner-key")
-    paths.passphrase.should eq("/home/caller/.config/tinrelay/harbor/passphrase")
+    paths.legacy_passphrase.should eq("/home/caller/.config/tinrelay/harbor/passphrase")
     paths.outgoing_observer.should eq(
       "/home/caller/.config/tinrelay/harbor/outgoing-observer.json"
     )

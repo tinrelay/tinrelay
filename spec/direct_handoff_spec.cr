@@ -16,16 +16,14 @@ end
 describe "direct radio handoff" do
   it "accepts at durable destination spool acknowledgement without waiting for pointer routing" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "direct handoff test passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
 
       capture = EnvelopeCaptureRemote.new(origin)
-      composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)
+      composer = Tinrelay::Client.new(beta.keyring, capture)
       composer.send("steward@alpha", "direct payload", "caller")
       envelope = capture.captured.not_nil!
 
@@ -91,15 +89,13 @@ describe "direct radio handoff" do
 
   it "persists when no wait exists and after an unacknowledged direct offer" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "fallback test passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       capture = EnvelopeCaptureRemote.new(origin)
-      composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)
+      composer = Tinrelay::Client.new(beta.keyring, capture)
 
       composer.send("steward@alpha", "no waiter", "caller")
       absent = capture.captured.not_nil!
@@ -118,7 +114,7 @@ describe "direct radio handoff" do
       api.store.acknowledge(absent_ack)
 
       capture = EnvelopeCaptureRemote.new(origin)
-      composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)
+      composer = Tinrelay::Client.new(beta.keyring, capture)
       composer.send("steward@alpha", "waiter vanished", "caller")
       interrupted = capture.captured.not_nil!
       wait_request = TinrelaySpec.radio_wait_request(alpha, 5)
@@ -153,15 +149,13 @@ describe "direct radio handoff" do
 
   it "does not hand new-generation traffic to a parked old radio" do
     TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "direct handoff retune passphrase"
       alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
+        File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
+        root, origin, "beta", alpha
       )
       gamma = TinrelaySpec.admit_contact(
-        root, origin, "gamma", passphrase, alpha
+        root, origin, "gamma", alpha
       )
 
       old_request = TinrelaySpec.radio_wait_request(alpha, 5)

@@ -55,7 +55,7 @@ module TinrelayRateLimitExclusionSpec
   end
 
   def self.seed_radio_limit(api : Tinrelay::API, client : Tinrelay::Client,
-                            passphrase : String, owner_generation : Int32,
+                            owner_generation : Int32,
                             now : Int64) : Int32
     ship = client.keyring.data.ship
     radio = client.keyring.data.radio!
@@ -78,7 +78,7 @@ module TinrelayRateLimitExclusionSpec
         )
       end
       active_generation = Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY + 1
-      owner = client.keyring.owner(passphrase).key
+      owner = client.keyring.owner.key
       certificate = Tinrelay::ShipRadioCertificate.new(
         ship, active_generation, radio.signing.public_key,
         radio.encryption.public_key, now, owner_generation
@@ -102,13 +102,13 @@ module TinrelayRateLimitExclusionSpec
     end.not_nil!.to_i
   end
 
-  def self.relationship_close(client : Tinrelay::Client, passphrase : String,
+  def self.relationship_close(client : Tinrelay::Client,
                               peer : String, radio_generation : Int32,
                               owner_generation : Int32,
                               admin_generation : Int64,
                               now : Int64) : Tinrelay::RelationshipClose
     prior = client.keyring.data.radio!
-    owner = client.keyring.owner(passphrase).key
+    owner = client.keyring.owner.key
     signing = Tinrelay::Crypto.signing_keypair
     encryption = Tinrelay::Crypto.box_keypair
     certificate = Tinrelay::ShipRadioCertificate.new(
@@ -146,13 +146,12 @@ end
 describe "authenticated ship rate-limit exclusions" do
   it "adds and removes transmission and hail exclusions atomically" do
     TinrelayRateLimitExclusionSpec.with_server(["alpha"]) do |root, origin, api, path|
-      passphrase = "rate limit exclusion passphrase"
       api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0_i64)
       api.runtime_snapshot.rate_limit_excluded?("alpha").should be_true
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
-      gamma = TinrelaySpec.admit(root, origin, "gamma", passphrase)
-      delta = TinrelaySpec.admit(root, origin, "delta", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit_contact(root, origin, "beta", alpha)
+      gamma = TinrelaySpec.admit(root, origin, "gamma")
+      delta = TinrelaySpec.admit(root, origin, "delta")
 
       while api.transmission_buckets.admit("127.0.0.1/32", 1).nil?
       end
@@ -197,9 +196,8 @@ describe "authenticated ship rate-limit exclusions" do
 
   it "bypasses only owner and radio rolling windows after authentication" do
     TinrelayRateLimitExclusionSpec.with_server do |root, origin, api, path|
-      passphrase = "rotation exclusion passphrase"
-      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
-      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
 
       Tinrelay::Store::MAX_OWNER_ROTATIONS_PER_DAY.times do
@@ -215,10 +213,10 @@ describe "authenticated ship rate-limit exclusions" do
       now = Time.utc.to_unix
       owner_generation = alpha.keyring.data.owner_generation
       radio_generation = TinrelayRateLimitExclusionSpec.seed_radio_limit(
-        api, alpha, passphrase, owner_generation, now
+        api, alpha, owner_generation, now
       )
       request = TinrelayRateLimitExclusionSpec.relationship_close(
-        alpha, passphrase, "beta", radio_generation,
+        alpha, "beta", radio_generation,
         owner_generation,
         api.database.db.scalar(
           "SELECT admin_generation FROM ships WHERE name = 'alpha'"

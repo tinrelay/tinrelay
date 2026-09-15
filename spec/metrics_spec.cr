@@ -9,8 +9,8 @@ describe "repeater metrics" do
       initial.headers["Cache-Control"].should eq("no-store")
       initial.body.should contain("tinrelay_registered_ships{state=\"active\"} 0")
 
-      alpha = TinrelaySpec.admit(root, origin, "alpha", "alpha metrics passphrase")
-      beta = TinrelaySpec.admit(root, origin, "beta", "beta metrics passphrase")
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      beta = TinrelaySpec.admit(root, origin, "beta")
       envelope = alpha.send("crew@alpha", "queued self transmission")
       alpha.hail("beta")
       waiter = api.handoffs.park("alpha", 1)

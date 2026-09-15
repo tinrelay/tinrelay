@@ -1,7 +1,9 @@
 require "spec"
 require "file_utils"
 require "../src/tinrelay/client_runtime"
+require "../src/tinrelay/legacy_key_migration"
 require "../src/tinrelay/server"
+require "./support/legacy_key_files"
 
 module TinrelaySpec
   DEFAULT_METADATA_LIMIT       = Tinrelay::DEFAULT_PERMANENT_METADATA_LIMIT
@@ -116,11 +118,8 @@ module TinrelaySpec
     request
   end
 
-  def self.admit(root : String, origin : String, ship : String,
-                 passphrase : String) : Tinrelay::Client
-    Tinrelay::Client.join(
-      File.join(root, "#{ship}.keyring"), origin, ship, passphrase
-    )
+  def self.admit(root : String, origin : String, ship : String) : Tinrelay::Client
+    Tinrelay::Client.join(File.join(root, "#{ship}.keyring"), origin, ship)
   end
 
   def self.claim_directly(store : Tinrelay::Store,
@@ -133,9 +132,8 @@ module TinrelaySpec
   end
 
   def self.admit_contact(root : String, origin : String, ship : String,
-                         passphrase : String,
                          peer : Tinrelay::Client) : Tinrelay::Client
-    client = admit(root, origin, ship, passphrase)
+    client = admit(root, origin, ship)
     connect(root, peer, client)
     client
   end

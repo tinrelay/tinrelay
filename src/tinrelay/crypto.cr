@@ -36,41 +36,6 @@ module Tinrelay
       pk : UInt8*,
       sk : UInt8*,
     ) : Int32
-
-    fun crypto_pwhash(
-      out : UInt8*,
-      out_len : UInt64,
-      password : UInt8*,
-      password_len : UInt64,
-      salt : UInt8*,
-      opslimit : UInt64,
-      memlimit : LibC::SizeT,
-      algorithm : Int32,
-    ) : Int32
-    fun crypto_pwhash_alg_argon2id13 : Int32
-
-    fun crypto_aead_xchacha20poly1305_ietf_encrypt(
-      ciphertext : UInt8*,
-      ciphertext_len : UInt64*,
-      message : UInt8*,
-      message_len : UInt64,
-      additional : UInt8*,
-      additional_len : UInt64,
-      nsec : UInt8*,
-      nonce : UInt8*,
-      key : UInt8*,
-    ) : Int32
-    fun crypto_aead_xchacha20poly1305_ietf_decrypt(
-      message : UInt8*,
-      message_len : UInt64*,
-      nsec : UInt8*,
-      ciphertext : UInt8*,
-      ciphertext_len : UInt64,
-      additional : UInt8*,
-      additional_len : UInt64,
-      nonce : UInt8*,
-      key : UInt8*,
-    ) : Int32
   end
 
   module Crypto
@@ -81,14 +46,6 @@ module Tinrelay
     BOX_PUBLIC_BYTES    = 32
     BOX_SECRET_BYTES    = 32
     SEAL_OVERHEAD_BYTES = 48
-    PWHASH_SALT_BYTES   = 16
-    KEY_BYTES           = 32
-    XCHACHA_NONCE_BYTES = 24
-    XCHACHA_TAG_BYTES   = 16
-    KDF_PROFILE         = "argon2id13-opslimit3-mem64m"
-    KEYRING_AD          = "tinrelay-keyring-v1".to_slice
-    OWNER_KEY_AD        = "tinrelay-owner-key-v1".to_slice
-
     record SigningKeyPair, public_key : Bytes, secret_key : Bytes
     record BoxKeyPair, public_key : Bytes, secret_key : Bytes
 
@@ -197,92 +154,6 @@ module Tinrelay
     def self.constant_time_equal?(a : Bytes, b : Bytes) : Bool
       return false unless a.size == b.size
       LibSodium.sodium_memcmp(a, b, a.size) == 0
-    end
-
-    def self.derive_key(passphrase : String, salt : Bytes) : Bytes
-      require_size(salt, PWHASH_SALT_BYTES, "keyring salt")
-      key = Bytes.new(KEY_BYTES)
-      password = passphrase.to_slice
-      result = LibSodium.crypto_pwhash(
-        key, key.size.to_u64, password, password.size.to_u64, salt,
-        3_u64, (64 * 1024 * 1024).to_u64, LibSodium.crypto_pwhash_alg_argon2id13
-      )
-      unless result == 0
-        memzero(key)
-        raise Error.new("key derivation failed")
-      end
-      key
-    end
-
-    def self.encrypt_keyring(plaintext : Bytes, passphrase : String) : Tuple(Bytes, Bytes, Bytes)
-      encrypt_blob(plaintext, passphrase, KEYRING_AD)
-    end
-
-    def self.encrypt_owner_key(plaintext : Bytes, passphrase : String) : Tuple(Bytes, Bytes, Bytes)
-      encrypt_blob(plaintext, passphrase, OWNER_KEY_AD)
-    end
-
-    def self.encrypt_blob(
-      plaintext : Bytes,
-      passphrase : String,
-      additional : Bytes,
-    ) : Tuple(Bytes, Bytes, Bytes)
-      salt = random(PWHASH_SALT_BYTES)
-      nonce = random(XCHACHA_NONCE_BYTES)
-      key = derive_key(passphrase, salt)
-      begin
-        # The fixed Argon2id13 profile turns the passphrase into a transient key;
-        # versioned associated data keeps radio and cold-owner files in separate domains.
-        ciphertext = Bytes.new(plaintext.size + XCHACHA_TAG_BYTES)
-        ciphertext_len = 0_u64
-        check LibSodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-          ciphertext, pointerof(ciphertext_len), plaintext, plaintext.size.to_u64,
-          additional, additional.size.to_u64, Pointer(UInt8).null, nonce, key
-        ), "keyring encryption"
-        {salt, nonce, ciphertext[0, ciphertext_len.to_i]}
-      ensure
-        memzero(key)
-      end
-    end
-
-    def self.decrypt_keyring(
-      ciphertext : Bytes,
-      salt : Bytes,
-      nonce : Bytes,
-      passphrase : String,
-    ) : Bytes
-      decrypt_blob(ciphertext, salt, nonce, passphrase, KEYRING_AD)
-    end
-
-    def self.decrypt_owner_key(
-      ciphertext : Bytes,
-      salt : Bytes,
-      nonce : Bytes,
-      passphrase : String,
-    ) : Bytes
-      decrypt_blob(ciphertext, salt, nonce, passphrase, OWNER_KEY_AD)
-    end
-
-    def self.decrypt_blob(ciphertext : Bytes, salt : Bytes, nonce : Bytes,
-                          passphrase : String, additional : Bytes) : Bytes
-      require_size(nonce, XCHACHA_NONCE_BYTES, "keyring nonce")
-      raise Invalid.new("encrypted keyring is too short") if ciphertext.size < XCHACHA_TAG_BYTES
-      key = derive_key(passphrase, salt)
-      begin
-        # Authentication covers both ciphertext and the file-type domain before
-        # any decrypted key material is accepted.
-        plaintext = Bytes.new(ciphertext.size - XCHACHA_TAG_BYTES)
-        plaintext_len = 0_u64
-        result = LibSodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-          plaintext, pointerof(plaintext_len), Pointer(UInt8).null,
-          ciphertext, ciphertext.size.to_u64, additional, additional.size.to_u64,
-          nonce, key
-        )
-        raise Unauthorized.new("keyring passphrase or contents are invalid") unless result == 0
-        plaintext[0, plaintext_len.to_i]
-      ensure
-        memzero(key)
-      end
     end
 
     def self.b64(bytes : Bytes) : String

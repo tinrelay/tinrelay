@@ -89,8 +89,7 @@ describe "ship claim recovery" do
     begin
       expect_raises(Tinrelay::RegistrationUnavailable) do
         Tinrelay::Client.join(
-          path, "http://127.0.0.1:#{address.port}", "closed", "closed passphrase"
-        )
+          path, "http://127.0.0.1:#{address.port}", "closed")
       end
       File.exists?(path).should be_false
       File.exists?(owner_path).should be_false
@@ -110,8 +109,7 @@ describe "ship claim recovery" do
 
       expect_raises(Tinrelay::Unauthorized) do
         Tinrelay::Client.join(
-          path, relay.origin, "foreign-response", "foreign response passphrase"
-        )
+          path, relay.origin, "foreign-response")
       end
 
       File.exists?(path).should be_true
@@ -131,8 +129,7 @@ describe "ship claim recovery" do
 
       error = expect_raises(Tinrelay::Unavailable) do
         Tinrelay::Client.join(
-          path, relay.origin, "foreign-429", "foreign response passphrase"
-        )
+          path, relay.origin, "foreign-429")
       end
 
       error.should_not be_a(Tinrelay::RegistrationLimited)
@@ -146,16 +143,15 @@ describe "ship claim recovery" do
     JoinRecoverySpec.with_relay(commit_first: true) do |root, relay, api|
       path = File.join(root, "lost.keyring")
       owner_path = "#{path}.owner"
-      passphrase = "lost response passphrase"
 
       expect_raises(Tinrelay::Unavailable) do
-        Tinrelay::Client.join(path, relay.origin, "lost", passphrase)
+        Tinrelay::Client.join(path, relay.origin, "lost")
       end
       keyring_bytes = File.read(path)
       owner_bytes = File.read(owner_path)
       api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(1)
 
-      recovered = Tinrelay::Client.join(path, relay.origin, "lost", passphrase)
+      recovered = Tinrelay::Client.join(path, relay.origin, "lost")
 
       recovered.keyring.data.ship.should eq("lost")
       File.read(path).should eq(keyring_bytes)
@@ -168,16 +164,15 @@ describe "ship claim recovery" do
     JoinRecoverySpec.with_relay(commit_first: false) do |root, relay, api|
       path = File.join(root, "retry.keyring")
       owner_path = "#{path}.owner"
-      passphrase = "uncommitted response passphrase"
 
       expect_raises(Tinrelay::Unavailable) do
-        Tinrelay::Client.join(path, relay.origin, "retry", passphrase)
+        Tinrelay::Client.join(path, relay.origin, "retry")
       end
       keyring_bytes = File.read(path)
       owner_bytes = File.read(owner_path)
       api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0)
 
-      Tinrelay::Client.join(path, relay.origin, "retry", passphrase)
+      Tinrelay::Client.join(path, relay.origin, "retry")
 
       relay.join_bodies.size.should eq(2)
       relay.join_bodies[1].should eq(relay.join_bodies[0])
@@ -191,20 +186,18 @@ describe "ship claim recovery" do
     JoinRecoverySpec.with_relay(commit_first: false) do |root, relay, api|
       path = File.join(root, "mismatch.keyring")
       owner_path = "#{path}.owner"
-      passphrase = "mismatching identity passphrase"
 
       expect_raises(Tinrelay::Unavailable) do
-        Tinrelay::Client.join(path, relay.origin, "mismatch", passphrase)
+        Tinrelay::Client.join(path, relay.origin, "mismatch")
       end
       keyring_bytes = File.read(path)
       owner_bytes = File.read(owner_path)
       other = Tinrelay::Keyring.create(
-        File.join(root, "other.keyring"), relay.origin, "mismatch", passphrase
-      )
+        File.join(root, "other.keyring"), relay.origin, "mismatch")
       JoinRecoverySpec.claim(api, other)
 
       expect_raises(Tinrelay::Conflict) do
-        Tinrelay::Client.join(path, relay.origin, "mismatch", passphrase)
+        Tinrelay::Client.join(path, relay.origin, "mismatch")
       end
 
       File.read(path).should eq(keyring_bytes)
