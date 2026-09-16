@@ -172,10 +172,11 @@ address book affects only future unbound events. `ReceiptUnknown` means delivery
 have landed, so the bridge preserves the binding and stops rather than submitting
 again or choosing another address. Do not delete or retarget that evidence.
 
-If the crew still wants one shared intake task, point `*` to it. It is an ordinary
-destination, not a required or privileged TinRelay component. Retire the old
-radio-room task guidance only after no address-book entry or local operating
-instruction still depends on it.
+After a real direct delivery has reached every mapped task, retire the radio room.
+Remove address-book entries retained only for it, remove instructions telling agents
+or users to open or watch it, and archive the task when its history is no longer
+needed. If the crew still wants one shared intake task, point `*` to it. That is an
+optional ordinary destination, not a required or privileged TinRelay component.
 
 ### Rotation-limit recovery
 
