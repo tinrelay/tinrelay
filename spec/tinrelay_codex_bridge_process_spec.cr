@@ -4,12 +4,31 @@ require "file_utils"
 require "uuid"
 
 require "./spec_helper"
+require "../src/tinrelay_codex_bridge/bridge"
+
+{% if flag?(:win32) %}
+  require "./support/windows_named_pipe_servers"
+{% end %}
 
 module TinrelayCodexBridgeProcessSpec
-  REPO           = File.expand_path("..", __DIR__)
-  BUILD_ROOT     = File.join(Dir.tempdir, "tinrelay-bridge-spec-#{Process.pid}")
-  BINARY         = File.join(BUILD_ROOT, "tinrelay-codex-bridge")
-  FIXTURE        = File.join(BUILD_ROOT, "tinrelay-codex-bridge-fake")
+  REPO        = File.expand_path("..", __DIR__)
+  BUILD_ROOT  = File.join(Dir.tempdir, "tinrelay-bridge-spec-#{Process.pid}")
+  BINARY_NAME = {% if flag?(:win32) %}
+                  "tinrelay-codex-bridge.exe"
+                {% elsif flag?(:darwin) || flag?(:linux) %}
+                  "tinrelay-codex-bridge"
+                {% else %}
+                     {% raise "TinRelay specs do not support this platform" %}
+                   {% end %}
+  FIXTURE_NAME = {% if flag?(:win32) %}
+                   "tinrelay-codex-bridge-fake.exe"
+                 {% elsif flag?(:darwin) || flag?(:linux) %}
+                   "tinrelay-codex-bridge-fake"
+                 {% else %}
+                     {% raise "TinRelay specs do not support this platform" %}
+                   {% end %}
+  BINARY         = File.join(BUILD_ROOT, BINARY_NAME)
+  FIXTURE        = File.join(BUILD_ROOT, FIXTURE_NAME)
   BRIDGE_SOURCE  = File.join(REPO, "src", "tinrelay_codex_bridge_cli.cr")
   FIXTURE_SOURCE = File.join(
     REPO, "spec", "support", "tinrelay_codex_bridge_fake.cr"
@@ -82,7 +101,13 @@ module TinrelayCodexBridgeProcessSpec
     end
 
     def signal(signal : Signal)
-      process.signal(signal)
+      {% if flag?(:win32) %}
+        process.terminate
+      {% elsif flag?(:darwin) || flag?(:linux) %}
+        process.signal(signal)
+      {% else %}
+        {% raise "TinRelay specs do not support this platform" %}
+      {% end %}
     rescue RuntimeError
     end
   end
@@ -90,9 +115,11 @@ module TinrelayCodexBridgeProcessSpec
   class Harness
     @app_tools_path : String
     {% if flag?(:win32) %}
-      @windows_server : Process?
-    {% else %}
+      @windows_server : TinrelaySpec::WindowsAppToolsServer?
+    {% elsif flag?(:darwin) || flag?(:linux) %}
       @app_tools_server : UNIXServer?
+    {% else %}
+      {% raise "TinRelay specs do not support this platform" %}
     {% end %}
 
     getter root : String
@@ -100,13 +127,17 @@ module TinrelayCodexBridgeProcessSpec
 
     def initialize
       TinrelayCodexBridgeProcessSpec.ensure_binaries
-      @root = "/tmp/trcb-#{Process.pid}-#{Random::Secure.hex(4)}"
+      @root = File.join(
+        Dir.tempdir, "trcb-#{Process.pid}-#{Random::Secure.hex(4)}"
+      )
       Dir.mkdir_p(@root)
       @app_tools_path = ""
       {% if flag?(:win32) %}
         @windows_server = nil
-      {% else %}
+      {% elsif flag?(:darwin) || flag?(:linux) %}
         @app_tools_server = nil
+      {% else %}
+        {% raise "TinRelay specs do not support this platform" %}
       {% end %}
       @result_file = File.join(root, "codex-result")
       File.write(@result_file, "success")
@@ -153,7 +184,13 @@ module TinrelayCodexBridgeProcessSpec
                when "malformed"       then "malformed"
                else                        "success"
                end
-      File.write(@result_file, result)
+      {% if flag?(:win32) %}
+        @windows_server.not_nil!.result = result
+      {% elsif flag?(:darwin) || flag?(:linux) %}
+        File.write(@result_file, result)
+      {% else %}
+        {% raise "TinRelay specs do not support this platform" %}
+      {% end %}
     end
 
     def write_addresses(value)
@@ -187,6 +224,7 @@ module TinrelayCodexBridgeProcessSpec
         arguments,
         env: ENV.to_h.merge({
           "HOME"                      => root,
+          "USERPROFILE"               => root,
           "CODEX_HOME"                => File.join(root, "codex"),
           "CODEX_APP_TOOLS_PIPE_PATH" => @app_tools_path,
           "BRIDGE_TEST_ROOT"          => root,
@@ -218,7 +256,13 @@ module TinrelayCodexBridgeProcessSpec
     end
 
     def codex_calls(operation : String? = nil)
-      rows = rows_at("codex_calls.jsonl")
+      rows = {% if flag?(:win32) %}
+               @windows_server.not_nil!.requests
+             {% elsif flag?(:darwin) || flag?(:linux) %}
+               rows_at("codex_calls.jsonl")
+             {% else %}
+               {% raise "TinRelay specs do not support this platform" %}
+             {% end %}
       return rows unless operation
       rows.select { |row| row["operation"].as_s == operation }
     end
@@ -240,15 +284,22 @@ module TinrelayCodexBridgeProcessSpec
         begin
           process.wait(4.seconds)
         rescue
-          process.signal(Signal::KILL)
+          {% if flag?(:win32) %}
+            process.process.terminate
+          {% elsif flag?(:darwin) || flag?(:linux) %}
+            process.signal(Signal::KILL)
+          {% else %}
+            {% raise "TinRelay specs do not support this platform" %}
+          {% end %}
           process.wait
         end
       end
       {% if flag?(:win32) %}
-        @windows_server.try(&.terminate)
-        @windows_server.try(&.wait)
-      {% else %}
+        @windows_server.try(&.close)
+      {% elsif flag?(:darwin) || flag?(:linux) %}
         @app_tools_server.try(&.close)
+      {% else %}
+        {% raise "TinRelay specs do not support this platform" %}
       {% end %}
       FileUtils.rm_r(root) if Dir.exists?(root)
     end
@@ -263,45 +314,17 @@ module TinrelayCodexBridgeProcessSpec
       {% if flag?(:win32) %}
         name = "tinrelay-codex-bridge-#{Process.pid}-#{Random::Secure.hex(4)}"
         @app_tools_path = "\\\\.\\pipe\\#{name}"
-        ready = File.join(root, "app-tools-ready")
-        script = File.join(
-          REPO,
-          "lib",
-          "codex_bridge",
-          "spec",
-          "support",
-          "windows_app_tools_server.ps1"
-        )
-        @windows_server = Process.new(
-          "powershell.exe",
-          [
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            script,
-            name,
-            File.join(root, "codex_calls.jsonl"),
-            @result_file,
-            ready,
-          ],
-          output: Process::Redirect::Close,
-          error: Process::Redirect::Inherit
-        )
-        200.times do
-          break if File.exists?(ready)
-          sleep 10.milliseconds
-        end
-        raise "fake app-tools pipe did not start" unless File.exists?(ready)
-      {% else %}
+        @windows_server = TinrelaySpec::WindowsAppToolsServer.new(name)
+      {% elsif flag?(:darwin) || flag?(:linux) %}
         @app_tools_path = File.join(root, "app-tools.sock")
         @app_tools_server = UNIXServer.new(@app_tools_path)
         spawn { serve_app_tools }
+      {% else %}
+        {% raise "TinRelay specs do not support this platform" %}
       {% end %}
     end
 
-    {% unless flag?(:win32) %}
+    {% if flag?(:darwin) || flag?(:linux) %}
       private def serve_app_tools
         loop do
           client = @app_tools_server.not_nil!.accept
@@ -603,7 +626,7 @@ describe "tinrelay-codex-bridge process contract" do
     end
   end
 
-  it "keeps one bridge owner and stops its waiting child on TERM" do
+  it "keeps one bridge owner and stops its waiting child when the bridge terminates" do
     with_bridge_harness do |h|
       first = h.start
       eventually { h.child_calls("wait").size == 1 }
@@ -614,8 +637,55 @@ describe "tinrelay-codex-bridge process contract" do
       h.output(1).should contain(%("reason":"bridge_already_running"))
 
       first.signal(Signal::TERM)
-      first.wait(3.seconds).exit_code.should eq(0)
-      Process.exists?(child_pid).should be_false
+      status = first.wait(3.seconds)
+      {% if flag?(:win32) %}
+        status.exit_code.should eq(1)
+      {% elsif flag?(:darwin) || flag?(:linux) %}
+        status.exit_code.should eq(0)
+      {% else %}
+        {% raise "TinRelay specs do not support this platform" %}
+      {% end %}
+      eventually { !Process.exists?(child_pid) }
     end
   end
+
+  it "terminates and reaps a child recorded after stop" do
+    TinrelayCodexBridgeProcessSpec.ensure_binaries
+    control = TinrelayCodexBridge::Control.new
+    control.stop
+    process = Process.new(
+      TinrelayCodexBridgeProcessSpec::FIXTURE,
+      env: {"TINRELAY_CODEX_BRIDGE_PIPE_HOLDER" => "1"}
+    )
+
+    expect_raises(TinrelayCodexBridge::Stopped) do
+      control.child = process
+    end
+    Process.exists?(process.pid).should be_false
+  end
+
+  {% if flag?(:win32) %}
+    it "creates reusable private ACLs for both bridge ownership locks" do
+      with_bridge_harness do |h|
+        process = h.start
+        eventually { h.child_calls("wait").size == 1 }
+
+        locks = [
+          File.join(
+            h.root, ".local", "share", "tinrelay-codex-bridge", "locks", "fixture.lock"
+          ),
+          File.join(
+            h.root, ".local", "share", "tinrelay", "fixture", "inbox",
+            "local-delivery.lock"
+          ),
+        ]
+        locks.each do |path|
+          File.exists?(path).should be_true
+          Tinrelay::PrivateStorage.private?(path).should be_true
+          Tinrelay::PrivateStorage.private?(File.dirname(path)).should be_true
+        end
+        process.running?.should be_true
+      end
+    end
+  {% end %}
 end

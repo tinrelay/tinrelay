@@ -53,7 +53,13 @@ describe Tinrelay::Remote do
   it "classifies an OS socket timeout for bounded caller retry" do
     remote = TinrelayClientTransportSpec::Remote.new("https://relay.example")
 
-    timeout = IO::Error.from_os_error("read", Errno::ETIMEDOUT)
+    timeout = {% if flag?(:win32) %}
+                IO::Error.from_os_error("read", WinError::WSAETIMEDOUT)
+              {% elsif flag?(:darwin) || flag?(:linux) %}
+                IO::Error.from_os_error("read", Errno::ETIMEDOUT)
+              {% else %}
+                {% raise "TinRelay specs do not support this platform" %}
+              {% end %}
     remote.retryable_transport_error_for_spec?(timeout).should be_true
   end
 
@@ -81,8 +87,11 @@ describe Tinrelay::Remote do
   it "does not classify TLS negotiation or verification failures as retryable" do
     response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
     TinrelayClientTransportSpec.with_raw_response(response, "https") do |origin|
-      error = expect_raises(OpenSSL::Error) do
+      error = begin
         Tinrelay::Remote.new(origin).post("/v1/test", %({}))
+        fail("expected a TLS negotiation failure")
+      rescue ex : OpenSSL::Error | IO::Error
+        ex
       end
       error.should_not be_a(Tinrelay::TransportUnavailable)
     end

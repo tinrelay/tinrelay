@@ -2,6 +2,10 @@ require "json"
 
 require "./spec_helper"
 
+{% if flag?(:win32) %}
+  require "./support/windows_named_pipe_servers"
+{% end %}
+
 module TinrelayCliSpec
   REPO       = File.expand_path("..", __DIR__)
   BUILD_ROOT = File.join(Dir.tempdir, "tinrelay-cli-send-spec-#{Process.pid}")
@@ -39,6 +43,28 @@ module TinrelayCliSpec
     process.input.close
     {process.wait, output.to_s, error.to_s}
   end
+
+  {% if flag?(:win32) %}
+    def self.run_without_home(args : Array(String), body : String, home : String,
+                              cwd : String) : Tuple(Process::Status, String, String)
+      ensure_binary
+      output = IO::Memory.new
+      error = IO::Memory.new
+      environment = {"HOME" => nil, "USERPROFILE" => home}.as(Hash(String, String?))
+      process = Process.new(
+        BINARY,
+        args,
+        env: environment,
+        chdir: cwd,
+        input: Process::Redirect::Pipe,
+        output: output,
+        error: error
+      )
+      process.input.print(body)
+      process.input.close
+      {process.wait, output.to_s, error.to_s}
+    end
+  {% end %}
 
   def self.run_without_eof(args : Array(String), home : String) : Tuple(Process::Status, String)
     ensure_binary
@@ -96,6 +122,77 @@ describe "tinrelay send CLI input" do
       record.signed_transmission.body.should eq("body from process stdin\n")
     end
   end
+
+  {% if flag?(:win32) %}
+    it "uses the Windows profile home when HOME is absent and cwd is elsewhere" do
+      TinrelaySpec.with_server do |root, origin, _api|
+        home = File.join(root, "home")
+        cwd = File.join(root, "project")
+        Dir.mkdir_p(cwd)
+        paths = Tinrelay::LocalPaths.new("alpha", home)
+        client = Tinrelay::Client.join(paths.keyring, origin, "alpha", paths.owner_key)
+
+        status, output, error = TinrelayCliSpec.run_without_home(
+          ["send", "@alpha", "--ship", "alpha"],
+          "body from non-home cwd\n",
+          home,
+          cwd
+        )
+        status.success?.should be_true
+        error.should be_empty
+        JSON.parse(output)["state"].as_s.should eq("accepted")
+
+        event = client.radio_wait(Tinrelay::Spool.new(paths.spool), hold_seconds: 0)
+        record = Tinrelay::Spool.new(paths.spool).get(event.local_id)
+          .as(Tinrelay::TransmissionSpoolRecord)
+        record.signed_transmission.body.should eq("body from non-home cwd\n")
+      end
+    end
+
+    it "emits the outgoing observer event from the built CLI with HOME absent" do
+      TinrelaySpec.with_server do |root, origin, _api|
+        home = File.join(root, "home")
+        cwd = File.join(root, "project")
+        Dir.mkdir_p(cwd)
+        paths = Tinrelay::LocalPaths.new("alpha", home)
+        client = Tinrelay::Client.join(paths.keyring, origin, "alpha", paths.owner_key)
+        listener = TinrelaySpec::WindowsLineServer.new(
+          "tinrelay-cli-observer-spec-#{Process.pid}-#{Random::Secure.hex(4)}"
+        )
+        begin
+          Tinrelay::AtomicPrivateFile.write(
+            paths.outgoing_observer,
+            Tinrelay::OutgoingObserver::Config.new(listener.path).to_json
+          )
+
+          status, output, error = TinrelayCliSpec.run_without_home(
+            ["send", "@alpha", "--ship", "alpha"],
+            "body observed from built CLI\n",
+            home,
+            cwd
+          )
+          status.success?.should be_true
+          error.should be_empty
+          accepted = JSON.parse(output)
+          accepted["state"].as_s.should eq("accepted")
+
+          event = JSON.parse(listener.receive)
+          event["contract"].as_s.should eq(Tinrelay::OutgoingObserver::CONTRACT)
+          event["transmission_id"].as_s.should eq(accepted["transmission_id"].as_s)
+          event["sender_ship"].as_s.should eq("alpha")
+          event["recipient_ship"].as_s.should eq("alpha")
+          event["body"].as_s.should eq("body observed from built CLI\n")
+
+          radio_event = client.radio_wait(
+            Tinrelay::Spool.new(paths.spool), hold_seconds: 0
+          )
+          radio_event.kind.should eq("transmission")
+        ensure
+          listener.close
+        end
+      end
+    end
+  {% end %}
 
   it "rejects extra arguments without waiting for or consuming body stdin" do
     root = TinrelaySpec.temporary_root
@@ -236,7 +333,7 @@ describe "tinrelay local key migration" do
     )
     identity = keyring.data.to_json
     TinrelaySpec::LegacyKeyFiles.wrap(keyring, "legacy passphrase")
-    File.write(paths.legacy_passphrase, "legacy passphrase\n", perm: 0o600)
+    Tinrelay::AtomicPrivateFile.write(paths.legacy_passphrase, "legacy passphrase\n")
 
     status, output, error = TinrelayCliSpec.run(
       ["--ship", "alpha", "migrate"], "", home
@@ -260,7 +357,7 @@ describe "tinrelay local key migration" do
     Tinrelay::Keyring.create(
       paths.keyring, "https://relay.example", "alpha", paths.owner_key
     )
-    File.write(paths.legacy_passphrase, "obsolete passphrase\n", perm: 0o600)
+    Tinrelay::AtomicPrivateFile.write(paths.legacy_passphrase, "obsolete passphrase\n")
 
     status, output, error = TinrelayCliSpec.run(
       ["--ship", "alpha", "migrate"], "", home
@@ -285,7 +382,7 @@ describe "tinrelay local key migration" do
     )
     TinrelaySpec::LegacyKeyFiles.wrap(keyring, "legacy passphrase")
     supplied = File.join(root, "migration-passphrase")
-    File.write(supplied, "legacy passphrase\n", perm: 0o600)
+    Tinrelay::AtomicPrivateFile.write(supplied, "legacy passphrase\n")
 
     status, output, error = TinrelayCliSpec.run(
       ["--ship", "alpha", "migrate", "--passphrase-file", supplied], "", home

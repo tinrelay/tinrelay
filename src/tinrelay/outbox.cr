@@ -31,8 +31,9 @@ module Tinrelay
 
     def list(now : Int64 = Time.utc.to_unix) : Array(SignedRelayEnvelope)
       cleanup(now)
-      Dir.glob(File.join(directory, "*.json")).sort.compact_map do |file|
-        id = File.basename(file, ".json")
+      Dir.children(directory).sort.compact_map do |name|
+        next unless name.ends_with?(".json")
+        id = File.basename(name, ".json")
         next unless UUID.matches?(id)
         read(id)[0]
       end
@@ -41,24 +42,24 @@ module Tinrelay
     def delete(id : String) : Nil
       target = path(id)
       return unless File.exists?(target)
-      File.delete(target)
-      File.open(directory, "r", &.fsync)
+      PrivateStorage.delete_replay_safe(target)
     end
 
     def cleanup(now : Int64 = Time.utc.to_unix) : Int32
       removed = 0
-      Dir.glob(File.join(directory, "*.json")).each do |file|
-        next unless UUID.matches?(File.basename(file, ".json"))
+      Dir.each_child(directory) do |name|
+        next unless name.ends_with?(".json")
+        next unless UUID.matches?(File.basename(name, ".json"))
+        file = File.join(directory, name)
         begin
           envelope = SignedRelayEnvelope.from_json(File.read(file))
           next if envelope.expires_at > now
-          File.delete(file)
+          PrivateStorage.delete_replay_safe(file)
           removed += 1
         rescue JSON::ParseException
           # Preserve malformed evidence for deliberate inspection.
         end
       end
-      File.open(directory, "r", &.fsync) if removed > 0
       removed
     end
 
@@ -71,7 +72,7 @@ module Tinrelay
       unless Dir.exists?(directory)
         Dir.mkdir_p(directory, mode: 0o700)
       end
-      File.chmod(directory, 0o700)
+      PrivateStorage.secure(directory, 0o700)
     end
   end
 end

@@ -70,8 +70,7 @@ module TinrelayCodexBridge
       unless current.local_id == local_id
         raise Blocked.new("pending_target_conflict")
       end
-      File.delete(@path)
-      File.open(File.dirname(@path), "r", &.fsync)
+      Tinrelay::PrivateStorage.delete_replay_safe(@path)
     rescue File::Error
       raise Blocked.new("pending_target_unwritable")
     end

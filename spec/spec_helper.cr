@@ -4,6 +4,9 @@ require "../src/tinrelay/client_runtime"
 require "../src/tinrelay/legacy_key_migration"
 require "../src/tinrelay/server"
 require "./support/legacy_key_files"
+{% if flag?(:win32) %}
+  require "./support/windows_acl"
+{% end %}
 
 module TinrelaySpec
   DEFAULT_METADATA_LIMIT       = Tinrelay::DEFAULT_PERMANENT_METADATA_LIMIT
@@ -16,6 +19,16 @@ module TinrelaySpec
     root = File.join(Dir.tempdir, "tinrelay-spec-#{Process.pid}-#{Tinrelay::Ids.uuid}")
     Dir.mkdir_p(root)
     root
+  end
+
+  def self.assert_private_storage(path : String, posix_mode : Int32) : Nil
+    {% if flag?(:win32) %}
+      Tinrelay::PrivateStorage.private?(path).should be_true
+    {% elsif flag?(:darwin) || flag?(:linux) %}
+      (File.info(path).permissions.value & 0o777).should eq(posix_mode)
+    {% else %}
+      {% raise "TinRelay specs do not support this platform" %}
+    {% end %}
   end
 
   def self.with_server(art_manifest_path : String? = nil,
@@ -141,10 +154,10 @@ module TinrelaySpec
   def self.connect(root : String, first : Tinrelay::Client,
                    second : Tinrelay::Client) : Nil
     first_spool = Tinrelay::Spool.new(File.join(
-      root, "contact-#{first.keyring.data.ship}-#{second.keyring.data.ship}"
+      root, "contact-#{Tinrelay::Ids.uuid[0, 8]}"
     ))
     second_spool = Tinrelay::Spool.new(File.join(
-      root, "contact-#{second.keyring.data.ship}-#{first.keyring.data.ship}"
+      root, "contact-#{Tinrelay::Ids.uuid[0, 8]}"
     ))
 
     first.hail(second.keyring.data.ship)

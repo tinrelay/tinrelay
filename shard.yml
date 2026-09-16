@@ -17,7 +17,7 @@ targets:
 dependencies:
   codex_bridge:
     github: tinrelay/codex-bridge
-    commit: 1ab1e375b560e98861d372da77b69aa4906d003a
+    commit: fb01ee91df8cfeffe397c83936428a691fbf820e
   markd:
     github: icyleaf/markd
     version: 0.6.0

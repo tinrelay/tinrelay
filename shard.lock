@@ -2,7 +2,7 @@ version: 2.0
 shards:
   codex_bridge:
     git: https://github.com/tinrelay/codex-bridge.git
-    version: 0.3.0+git.commit.1ab1e375b560e98861d372da77b69aa4906d003a
+    version: 0.3.0+git.commit.fb01ee91df8cfeffe397c83936428a691fbf820e
 
   db:
     git: https://github.com/crystal-lang/crystal-db.git

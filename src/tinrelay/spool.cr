@@ -18,7 +18,7 @@ module Tinrelay
           unless Dir.exists?(directory)
             Dir.mkdir_p(directory, mode: 0o700)
           end
-          File.chmod(directory, 0o700)
+          PrivateStorage.secure(directory, 0o700)
         end
       end
     end
@@ -74,7 +74,7 @@ module Tinrelay
 
     private def with_lock(path : String, conflict : String, &block : -> T) : T forall T
       File.open(path, "a", perm: 0o600) do |file|
-        File.chmod(path, 0o600)
+        PrivateStorage.secure(path, 0o600)
         begin
           file.flock_exclusive(false)
         rescue IO::Error
@@ -243,7 +243,11 @@ module Tinrelay
 
     private def each_record_in(directory : String) : Array(SpoolRecord)
       records = [] of SpoolRecord
-      Dir.glob(File.join(directory, "tr_*.json")).sort.each do |path|
+      names = Dir.children(directory).select do |name|
+        name.starts_with?("tr_") && name.ends_with?(".json")
+      end
+      names.sort.each do |name|
+        path = File.join(directory, name)
         begin
           record = SpoolRecord.from_json(File.read(path))
           verify_record!(record)
@@ -290,22 +294,19 @@ module Tinrelay
         unless File.file?(destination) && File.read(destination) == source_bytes
           raise Conflict.new(conflict)
         end
-        delete_if_present(source, File.dirname(source))
+        delete_if_present(source)
         return
       end
 
-      File.rename(source, destination)
-      File.open(File.dirname(source), "r", &.fsync)
-      File.open(File.dirname(destination), "r", &.fsync)
+      PrivateStorage.replace(source, destination)
     rescue ex : File::NotFoundError
       unless File.file?(destination) && File.read(destination) == source_bytes
         raise Error.new("inbox record disappeared while routing")
       end
     end
 
-    private def delete_if_present(path : String, directory : String) : Nil
-      File.delete(path)
-      File.open(directory, "r", &.fsync)
+    private def delete_if_present(path : String) : Nil
+      PrivateStorage.delete_replay_safe(path)
     rescue File::NotFoundError
     end
 

@@ -1,6 +1,8 @@
 require "json"
 require "option_parser"
 require "codex_bridge"
+require "../tinrelay/platform/private_storage"
+require "./child_lifetime"
 
 module TinrelayCodexBridge
   VERSION = "0.2.0"
@@ -15,7 +17,21 @@ module TinrelayCodexBridge
 
   class Control
     getter stopped = false
-    property child : Process? = nil
+    getter child : Process? = nil
+
+    def initialize(@child_lifetime = ChildLifetime.new)
+    end
+
+    def child=(process : Process?) : Process?
+      @child = process
+      return unless process
+      if stopped
+        terminate_and_reap(process)
+        @child = nil if @child == process
+        raise Stopped.new
+      end
+      process
+    end
 
     def stop
       @stopped = true
@@ -40,6 +56,13 @@ module TinrelayCodexBridge
       process.terminate(graceful: graceful)
     rescue IO::Error
       # The owned child may have exited between notification and termination.
+    end
+
+    private def terminate_and_reap(process : Process) : Nil
+      terminate(process, graceful: false)
+      process.wait
+    rescue IO::Error
+      # A child that exited during the stop race may already have been reaped.
     end
 
     def pause(seconds : Int32)

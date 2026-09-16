@@ -24,6 +24,33 @@ class AcceptThenDropRemote < Tinrelay::Remote
 end
 
 describe "the socially blind repeater boundary" do
+  it "ignores a bare UUID sibling in both outbox listing and cleanup" do
+    root = TinrelaySpec.temporary_root
+    outbox = Tinrelay::Outbox.new(File.join(root, "outbox"))
+    now = Time.utc.to_unix
+    retained = Tinrelay::SignedRelayEnvelope.new(
+      Tinrelay::Ids.uuid, "alpha", 1, "beta", 1,
+      now, now + 3600, Tinrelay::Crypto.b64(Tinrelay::Crypto.random(64))
+    )
+    outbox.store(retained)
+    retained_bare = File.join(outbox.directory, retained.transmission_id)
+    File.write(retained_bare, retained.to_json)
+
+    outbox.list(now).map(&.transmission_id).should eq([retained.transmission_id])
+    File.exists?(retained_bare).should be_true
+
+    expired = Tinrelay::SignedRelayEnvelope.new(
+      Tinrelay::Ids.uuid, "alpha", 1, "beta", 1,
+      now - 3600, now - 1, Tinrelay::Crypto.b64(Tinrelay::Crypto.random(64))
+    )
+    expired_bare = File.join(outbox.directory, expired.transmission_id)
+    File.write(expired_bare, expired.to_json)
+    outbox.cleanup(now).should eq(0)
+    File.exists?(expired_bare).should be_true
+  ensure
+    FileUtils.rm_r(root) if root && Dir.exists?(root)
+  end
+
   it "retains one exact encrypted envelope when acceptance is unknown" do
     TinrelaySpec.with_server do |root, origin, api|
       alpha = Tinrelay::Client.join(
@@ -31,7 +58,14 @@ describe "the socially blind repeater boundary" do
       beta = TinrelaySpec.admit_contact(
         root, origin, "beta", alpha
       )
-      outbox = Tinrelay::Outbox.new(File.join(root, "outbox"))
+      directory = {% if flag?(:win32) %}
+                    File.join(root, "outbox")
+                  {% elsif flag?(:darwin) || flag?(:linux) %}
+                    File.join(root, "literal\\backslash")
+                  {% else %}
+                    {% raise "unsupported platform" %}
+                  {% end %}
+      outbox = Tinrelay::Outbox.new(directory)
       unreliable_remote = AcceptThenDropRemote.new(origin, api.store, outbox.directory)
       unreliable = Tinrelay::Client.new(beta.keyring, unreliable_remote)
 
@@ -42,9 +76,9 @@ describe "the socially blind repeater boundary" do
       pending.size.should eq(1)
       pending[0].transmission_id.should eq(failure.transmission_id)
       unreliable_remote.saw_preserved_envelope.should be_true
-      File.info(File.join(root, "outbox")).permissions.value.should eq(0o700)
-      path = File.join(root, "outbox", "#{failure.transmission_id}.json")
-      File.info(path).permissions.value.should eq(0o600)
+      TinrelaySpec.assert_private_storage(directory, 0o700)
+      path = File.join(directory, "#{failure.transmission_id}.json")
+      TinrelaySpec.assert_private_storage(path, 0o600)
       api.database.db.scalar(
         "SELECT COUNT(*) FROM transmissions WHERE id = ?", failure.transmission_id
       ).as(Int64).should eq(1)

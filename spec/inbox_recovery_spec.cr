@@ -72,13 +72,37 @@ module TinrelayInboxSpec
   end
 
   def self.record_path(root : String, local_id : String) : String
-    paths = Dir.glob(File.join(root, "**", "#{local_id}.json"))
+    pattern = Path.new(File.join(root, "**", "#{local_id}.json")).to_posix
+    paths = Dir.glob(pattern)
     raise "expected one immutable record, found #{paths.size}" unless paths.size == 1
     paths.first
   end
 end
 
 describe "inbox recovery transitions" do
+  it "accepts an identical routed record when its pending source is already gone" do
+    root = TinrelaySpec.temporary_root
+    now = Time.utc.to_unix
+    envelope = Tinrelay::SignedRelayEnvelope.new(
+      Tinrelay::Ids.uuid, "alpha", 1, "beta", 1,
+      now, now + 3600, Tinrelay::Crypto.b64(Tinrelay::Crypto.random(64))
+    )
+    spool = Tinrelay::Spool.new(File.join(root, "inbox"))
+    record = spool.store_rejection(envelope, "invalid_envelope")
+    pending = File.join(spool.pending, "#{record.local_id}.json")
+    routed = File.join(spool.routed, "#{record.local_id}.json")
+    begin
+      File.copy(pending, routed)
+      File.delete(pending)
+
+      reconciled = spool.routed(record.local_id)
+      reconciled.local_id.should eq(record.local_id)
+      reconciled.routed.should be_true
+    ensure
+      FileUtils.rm_r(root) if Dir.exists?(root)
+    end
+  end
+
   it "turns changed signed words under a directly delivered ID " +
      "into content-free conflict evidence" do
     TinrelaySpec.with_server do |root, origin, api|

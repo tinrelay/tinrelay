@@ -835,24 +835,16 @@ describe "the canonical bootstrap representations" do
   it "rejects malformed runtime art configuration before serving" do
     root = TinrelaySpec.temporary_root
     begin
-      oversized_pipe = File.join(root, "oversized.pipe")
-      Process.run("mkfifo", [oversized_pipe]).success?.should be_true
-      writer = Process.new(
-        "dd",
-        ["if=/dev/zero", "of=#{oversized_pipe}",
-         "bs=#{Tinrelay::ArtManifest::MAX_BYTES + 1}", "count=1"],
-        output: Process::Redirect::Close,
-        error: Process::Redirect::Close
-      )
+      oversized_path = File.join(root, "oversized.json")
+      File.write(oversized_path, Bytes.new(Tinrelay::ArtManifest::MAX_BYTES + 1))
       oversized = expect_raises(Tinrelay::Invalid) do
         Tinrelay::ArtManifest.load(
-          oversized_pipe, Tinrelay::BootstrapPage::PAGE_KEYS
+          oversized_path, Tinrelay::BootstrapPage::PAGE_KEYS
         )
       end
       oversized.message.should eq(
         "art manifest exceeds #{Tinrelay::ArtManifest::MAX_BYTES} bytes"
       )
-      writer.wait.success?.should be_true
 
       invalid_json = File.join(root, "invalid.json")
       File.write(invalid_json, "[]")

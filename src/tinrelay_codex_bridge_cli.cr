@@ -82,8 +82,7 @@ module TinrelayCodexBridge
       deref: deref
     )
     control = Control.new
-    Signal::INT.trap { control.stop }
-    Signal::TERM.trap { control.stop }
+    Process.on_terminate { control.stop }
     runner = Runner.new(config, control)
     command == "run" ? runner.run : runner.check
     0

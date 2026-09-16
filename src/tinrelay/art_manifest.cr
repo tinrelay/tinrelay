@@ -13,7 +13,7 @@ module Tinrelay
 
     def self.load(path : String?, allowed_pages : Array(String)) : self
       return empty unless path
-      raise Invalid.new("art manifest path must be absolute") unless path.starts_with?('/')
+      raise Invalid.new("art manifest path must be absolute") unless Path.new(path).absolute?
 
       bytes = File.open(path) do |file|
         buffer = IO::Memory.new

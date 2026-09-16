@@ -228,9 +228,8 @@ describe "protocol-1 ship authorship" do
       record.sender_radio_certificate.generation.should eq(2)
       record.sender_owner_chain.map(&.generation).should eq([1, 2])
       record.sender_owner_chain.last.public_key.should eq(beta.keyring.data.owner_public_key)
-      local_path = Dir.glob(
-        File.join(spool.root, "**", "#{record.local_id}.json")
-      ).first
+      pattern = File.join(spool.root, "**", "#{record.local_id}.json")
+      local_path = Dir.glob(Path.new(pattern).to_posix).first
       local_json = File.read(local_path)
       local_json.scan("durable provenance").size.should eq(1)
       local_json.should_not contain(sent.ciphertext)

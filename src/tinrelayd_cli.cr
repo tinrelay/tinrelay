@@ -62,15 +62,20 @@ module Tinrelay
           server.close
         end
       }
-      Signal::INT.trap { stop.call }
-      Signal::TERM.trap { stop.call }
+      Process.on_terminate { stop.call }
       reload_requests = Channel(Nil).new(1)
-      Signal::HUP.trap do
-        select
-        when reload_requests.send(nil)
-        else
+      {% if flag?(:darwin) || flag?(:linux) %}
+        Signal::HUP.trap do
+          select
+          when reload_requests.send(nil)
+          else
+          end
         end
-      end
+      {% elsif flag?(:win32) %}
+        # Windows service control has no SIGHUP equivalent.
+      {% else %}
+        {% raise "TinRelay does not support this platform" %}
+      {% end %}
       spawn do
         loop do
           reload_requests.receive

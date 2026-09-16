@@ -16,14 +16,26 @@ describe "local radio status" do
       record.to_pretty_json + "\n"
     )
     File.write(File.join(spool.routed, "tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"), "corrupt")
-    File.chmod(spool_root, 0o750)
+    {% if flag?(:win32) %}
+      TinrelaySpec::WindowsAcl.permissive(spool_root)
+    {% elsif flag?(:darwin) || flag?(:linux) %}
+      File.chmod(spool_root, 0o750)
+    {% else %}
+      {% raise "TinRelay specs do not support this platform" %}
+    {% end %}
 
     reader = Tinrelay::Spool.open_existing(spool_root)
     reader.status(record.local_id).should eq({
       state: "pending", local_id: record.local_id,
       kind: "rejected_transmission",
     })
-    (File.info(spool_root).permissions.value & 0o777).should eq(0o750)
+    {% if flag?(:win32) %}
+      Tinrelay::PrivateStorage.private?(spool_root).should be_false
+    {% elsif flag?(:darwin) || flag?(:linux) %}
+      (File.info(spool_root).permissions.value & 0o777).should eq(0o750)
+    {% else %}
+      {% raise "TinRelay specs do not support this platform" %}
+    {% end %}
 
     original = File.read(File.join(spool.pending, "#{record.local_id}.json"))
     spool.routed(record.local_id)

@@ -109,7 +109,9 @@ describe Config do
     config = Config.new("fixture", executable, home: "/home/operator")
 
     config.routing_file.should eq(
-      "/home/operator/.config/tinrelay/fixture/codex-addresses.json"
+      File.join(
+        "/home/operator", ".config", "tinrelay", "fixture", "codex-addresses.json"
+      )
     )
     config.timeout.should eq(60.seconds)
     config.deref?.should be_true

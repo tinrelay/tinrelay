@@ -11,9 +11,9 @@ describe Tinrelay::Keyring do
 
     File.read(path).should contain(keyring.data.radio!.signing.secret_key)
     File.read(keyring.owner_path).should contain(owner.key.secret_key)
-    (File.info(directory).permissions.value & 0o777).should eq(0o700)
-    (File.info(path).permissions.value & 0o777).should eq(0o600)
-    (File.info(keyring.owner_path).permissions.value & 0o777).should eq(0o600)
+    TinrelaySpec.assert_private_storage(directory, 0o700)
+    TinrelaySpec.assert_private_storage(path, 0o600)
+    TinrelaySpec.assert_private_storage(keyring.owner_path, 0o600)
 
     loaded = Tinrelay::Keyring.load(path)
     loaded.data.to_json.should eq(keyring.data.to_json)

@@ -4,14 +4,17 @@ describe Tinrelay::LocalPaths do
   it "derives every private path from one validated ship selector" do
     paths = Tinrelay::LocalPaths.new("harbor", "/home/caller")
 
-    paths.keyring.should eq("/home/caller/.config/tinrelay/harbor/keyring")
-    paths.owner_key.should eq("/home/caller/.config/tinrelay/harbor/owner-key")
-    paths.legacy_passphrase.should eq("/home/caller/.config/tinrelay/harbor/passphrase")
+    config = File.join("/home/caller", ".config", "tinrelay", "harbor")
+    data = File.join("/home/caller", ".local", "share", "tinrelay", "harbor")
+
+    paths.keyring.should eq(File.join(config, "keyring"))
+    paths.owner_key.should eq(File.join(config, "owner-key"))
+    paths.legacy_passphrase.should eq(File.join(config, "passphrase"))
     paths.outgoing_observer.should eq(
-      "/home/caller/.config/tinrelay/harbor/outgoing-observer.json"
+      File.join(config, "outgoing-observer.json")
     )
-    paths.spool.should eq("/home/caller/.local/share/tinrelay/harbor/inbox")
-    paths.outbox.should eq("/home/caller/.local/share/tinrelay/harbor/outbox")
+    paths.spool.should eq(File.join(data, "inbox"))
+    paths.outbox.should eq(File.join(data, "outbox"))
   end
 
   it "rejects a ship name before using it as a path component" do

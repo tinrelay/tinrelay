@@ -1,5 +1,9 @@
 require "./spec_helper"
 
+{% if flag?(:win32) %}
+  require "./support/windows_named_pipe_servers"
+{% end %}
+
 class ObserverUnavailableRemote < Tinrelay::Remote
   def post(path : String, body : String) : String
     raise Tinrelay::TransportUnavailable.new
@@ -7,15 +11,82 @@ class ObserverUnavailableRemote < Tinrelay::Remote
 end
 
 module OutgoingObserverSpec
+  {% if flag?(:win32) %}
+    class Listener
+      getter path : String
+
+      def initialize
+        @server = TinrelaySpec::WindowsLineServer.new(
+          "tinrelay-observer-spec-#{Process.pid}-#{Random::Secure.hex(4)}"
+        )
+        @path = @server.path
+      end
+
+      def receive : String
+        @server.receive
+      end
+
+      def received_within?(duration : Time::Span) : Bool
+        @server.received_within?(duration)
+      end
+
+      def close : Nil
+        @server.close
+      end
+    end
+  {% elsif flag?(:darwin) || flag?(:linux) %}
+    class Listener
+      getter path : String
+
+      def initialize(@root : String)
+        @path = File.join(root, "observer.sock")
+        @server = UNIXServer.new(path)
+        @received = Channel(String).new(1)
+        spawn do
+          begin
+            socket = @server.accept
+            @received.send(socket.gets_to_end)
+            socket.close
+          rescue IO::Error
+          end
+        end
+      end
+
+      def receive : String
+        @received.receive
+      end
+
+      def received_within?(duration : Time::Span) : Bool
+        select
+        when @received.receive
+          true
+        when timeout(duration)
+          false
+        end
+      end
+
+      def close : Nil
+        @server.close
+      end
+    end
+  {% else %}
+    {% raise "TinRelay specs do not support this platform" %}
+  {% end %}
+
   def self.with_listener(&)
     root = File.join(
       Dir.tempdir, "tinrelay-observer-#{Process.pid}-#{Tinrelay::Ids.uuid[0, 8]}"
     )
     Dir.mkdir(root, mode: 0o700)
-    path = File.join(root, "observer.sock")
-    listener = UNIXServer.new(path)
+    listener = {% if flag?(:win32) %}
+                 Listener.new
+               {% elsif flag?(:darwin) || flag?(:linux) %}
+                 Listener.new(root)
+               {% else %}
+                 {% raise "TinRelay specs do not support this platform" %}
+               {% end %}
     begin
-      yield root, path, listener
+      yield listener.path, listener
     ensure
       listener.close
       FileUtils.rm_r(root) if Dir.exists?(root)
@@ -77,13 +148,7 @@ describe Tinrelay::OutgoingObserver do
       OutgoingObserverSpec.signed_plaintext_size(
         sender_ship, recipient_ship, attention_label, author_label, body + "x"
       ).should be > Tinrelay::Client::MAX_PLAINTEXT_BYTES
-      OutgoingObserverSpec.with_listener do |_private_root, socket_path, listener|
-        received = Channel(String).new
-        spawn do
-          socket = listener.accept
-          received.send(socket.gets_to_end)
-          socket.close
-        end
+      OutgoingObserverSpec.with_listener do |socket_path, listener|
         config_path = File.join(root, "outgoing-observer.json")
         File.write(
           config_path,
@@ -95,7 +160,7 @@ describe Tinrelay::OutgoingObserver do
           "#{attention_label}@#{recipient_ship}", body, author_label,
           observer: observer
         )
-        raw = TinrelaySpec.receive(received)
+        raw = listener.receive
         raw.ends_with?('\n').should be_true
         event = JSON.parse(raw).as_h
         event.should eq({
@@ -118,16 +183,7 @@ describe Tinrelay::OutgoingObserver do
       alpha = Tinrelay::Client.join(
         File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(root, origin, "beta", alpha)
-      OutgoingObserverSpec.with_listener do |_private_root, socket_path, listener|
-        arrived = Channel(Bool).new
-        spawn do
-          begin
-            socket = listener.accept
-            socket.close
-            arrived.send(true)
-          rescue IO::Error
-          end
-        end
+      OutgoingObserverSpec.with_listener do |socket_path, listener|
         config_path = File.join(root, "outgoing-observer.json")
         File.write(
           config_path,
@@ -141,10 +197,8 @@ describe Tinrelay::OutgoingObserver do
         expect_raises(Tinrelay::AcceptanceUnknown) do
           unavailable.send("steward@alpha", "not accepted", observer: observer)
         end
-        select
-        when arrived.receive
+        if listener.received_within?(100.milliseconds)
           fail "observer received a transmission before definitive acceptance"
-        when timeout(100.milliseconds)
         end
       end
     end
@@ -155,14 +209,19 @@ describe Tinrelay::OutgoingObserver do
       alpha = Tinrelay::Client.join(
         File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit_contact(root, origin, "beta", alpha)
-      private_root = File.join(root, "observer")
-      Dir.mkdir(private_root, mode: 0o700)
       config_path = File.join(root, "outgoing-observer.json")
+      missing_endpoint = {% if flag?(:win32) %}
+                           "\\\\.\\pipe\\tinrelay-missing-#{Process.pid}"
+                         {% elsif flag?(:darwin) || flag?(:linux) %}
+                           private_root = File.join(root, "observer")
+                           Dir.mkdir(private_root, mode: 0o700)
+                           File.join(private_root, "missing.sock")
+                         {% else %}
+                           {% raise "TinRelay specs do not support this platform" %}
+                         {% end %}
       File.write(
         config_path,
-        Tinrelay::OutgoingObserver::Config.new(
-          File.join(private_root, "missing.sock")
-        ).to_json
+        Tinrelay::OutgoingObserver::Config.new(missing_endpoint).to_json
       )
       observer = Tinrelay::OutgoingObserver.from_config(config_path).not_nil!
 
@@ -185,16 +244,29 @@ describe Tinrelay::OutgoingObserver do
       File.write(relative, %({"socket_path":"observer.sock"}))
       Tinrelay::OutgoingObserver.from_config(relative).should be_nil
 
-      public_root = File.join(root, "public")
-      Dir.mkdir(public_root, mode: 0o755)
-      public_config = File.join(root, "public.json")
-      File.write(
-        public_config,
-        Tinrelay::OutgoingObserver::Config.new(
-          File.join(public_root, "observer.sock")
-        ).to_json
-      )
-      Tinrelay::OutgoingObserver.from_config(public_config).should be_nil
+      {% if flag?(:win32) %}
+        invalid_config = File.join(root, "invalid-pipe.json")
+        File.write(
+          invalid_config,
+          Tinrelay::OutgoingObserver::Config.new(
+            "\\\\.\\pipe\\parent\\observer"
+          ).to_json
+        )
+        Tinrelay::OutgoingObserver.from_config(invalid_config).should be_nil
+      {% elsif flag?(:darwin) || flag?(:linux) %}
+        public_root = File.join(root, "public")
+        Dir.mkdir(public_root, mode: 0o755)
+        public_config = File.join(root, "public.json")
+        File.write(
+          public_config,
+          Tinrelay::OutgoingObserver::Config.new(
+            File.join(public_root, "observer.sock")
+          ).to_json
+        )
+        Tinrelay::OutgoingObserver.from_config(public_config).should be_nil
+      {% else %}
+        {% raise "TinRelay specs do not support this platform" %}
+      {% end %}
 
       oversized = File.join(root, "oversized.json")
       File.write(oversized, " " * (Tinrelay::OutgoingObserver::MAX_CONFIG_BYTES + 1))

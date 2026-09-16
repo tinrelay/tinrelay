@@ -443,8 +443,10 @@ describe "tinrelayd runtime policy" do
     policy.resolve(peer, headers).address.should eq("192.0.2.10")
 
     expect_raises(Tinrelay::Invalid) { policy.resolve(nil, headers) }
-    unix = Socket::UNIXAddress.new("/tmp/tinrelay-policy-spec")
-    expect_raises(Tinrelay::Invalid) { policy.resolve(unix, headers) }
+    {% if flag?(:darwin) || flag?(:linux) %}
+      unix = Socket::UNIXAddress.new("/tmp/tinrelay-policy-spec")
+      expect_raises(Tinrelay::Invalid) { policy.resolve(unix, headers) }
+    {% end %}
   end
 
   it "trusts exactly one literal client address only from a configured ingress" do

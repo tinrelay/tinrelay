@@ -360,7 +360,7 @@ module Tinrelay
     end
 
     private def self.home : String
-      ENV["HOME"]? || "."
+      ENV["HOME"]? || Path.home.to_s
     end
 
     HELP = {{ read_file("templates/tinrelay-help.txt") }}

@@ -7,7 +7,7 @@ module Tinrelay
       unless Dir.exists?(directory)
         Dir.mkdir_p(directory, mode: 0o700)
       end
-      File.chmod(directory, 0o700)
+      PrivateStorage.secure(directory, 0o700)
       temporary = "#{path}.tmp.#{Process.pid}.#{Random::Secure.hex(6)}"
       begin
         File.open(temporary, "w", perm: 0o600) do |file|
@@ -15,9 +15,8 @@ module Tinrelay
           file.flush
           file.fsync
         end
-        File.chmod(temporary, 0o600)
-        File.rename(temporary, path)
-        File.open(directory, "r", &.fsync)
+        PrivateStorage.secure(temporary, 0o600)
+        PrivateStorage.replace(temporary, path)
       ensure
         File.delete(temporary) if File.exists?(temporary)
       end

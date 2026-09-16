@@ -48,10 +48,11 @@ module TinrelayCodexBridge
     end
 
     private def with_lock(path, error, &)
-      Dir.mkdir_p(File.dirname(path), mode: 0o700)
+      directory = File.dirname(path)
+      Dir.mkdir_p(directory, mode: 0o700)
+      Tinrelay::PrivateStorage.secure(directory, 0o700)
       File.open(path, "a", perm: 0o600) do |lock|
-        lock.close_on_exec = true
-        File.chmod(path, 0o600)
+        Tinrelay::PrivateStorage.secure(path, 0o600)
         begin
           lock.flock_exclusive(false)
         rescue IO::Error

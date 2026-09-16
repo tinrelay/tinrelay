@@ -10,7 +10,9 @@ describe "the client compilation boundary" do
       chdir: root, output: output, error: error
     )
     result.success?.should be_true, error.to_s
-    dependencies = output.to_s
+    dependencies = output.to_s.each_line.map do |line|
+      Path.new(line.strip).to_posix.to_s
+    end
     dependencies.should contain("src/tinrelay/client.cr")
     dependencies.should_not contain("src/tinrelay/database.cr")
     dependencies.should_not contain("src/tinrelay/store.cr")

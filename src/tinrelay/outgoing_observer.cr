@@ -1,5 +1,6 @@
 require "json"
-require "socket"
+
+require "./platform/outgoing_observer_transport"
 
 module Tinrelay
   class OutgoingObserver
@@ -45,8 +46,7 @@ module Tinrelay
       return unless File.file?(path)
       config = Config.from_json(read_config(path))
       socket_path = config.socket_path
-      return unless Path.new(socket_path).absolute?
-      return unless private_directory?(File.dirname(socket_path))
+      return unless OutgoingObserverTransport.valid_endpoint?(socket_path)
       new(socket_path)
     rescue
       nil
@@ -61,11 +61,6 @@ module Tinrelay
       end
     end
 
-    private def self.private_directory?(path : String) : Bool
-      info = File.info(path)
-      info.directory? && info.permissions.value & 0o077 == 0
-    end
-
     def initialize(@socket_path : String)
     end
 
@@ -73,15 +68,10 @@ module Tinrelay
       encoded = Event.new(transmission).to_json
       return if encoded.bytesize > MAX_EVENT_BYTES
 
-      socket = Socket.unix
-      socket.connect(Socket::UNIXAddress.new(@socket_path), TIMEOUT)
-      socket.write_timeout = TIMEOUT
-      socket.puts(encoded)
+      OutgoingObserverTransport.notify(@socket_path, encoded, TIMEOUT)
     rescue
       # This is an optional same-user presentation hook. A failed observer must
       # never change the accepted send, its evidence, or its outbox state.
-    ensure
-      socket.try(&.close)
     end
   end
 end

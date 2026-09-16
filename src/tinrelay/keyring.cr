@@ -310,10 +310,10 @@ module Tinrelay
       directory = File.dirname(path)
       unless Dir.exists?(directory)
         Dir.mkdir_p(directory, mode: 0o700)
-        File.chmod(directory, 0o700)
       end
+      PrivateStorage.secure(directory, 0o700)
       File.open("#{path}.lock", "a+", perm: 0o600) do |file|
-        File.chmod(file.path, 0o600)
+        PrivateStorage.secure(file.path, 0o600)
         file.flock_exclusive
         begin
           yield file
@@ -436,9 +436,8 @@ module Tinrelay
 
     protected def self.read_private(path : String, label : String) : String
       raise NotFound.new("#{label} not found: #{path}") unless File.file?(path)
-      permissions = File.info(path).permissions.value & 0o777
-      if permissions & 0o077 != 0
-        raise Invalid.new("#{label} must not be accessible by group or others")
+      unless PrivateStorage.private?(path)
+        raise Invalid.new("#{label} must be private to the current user")
       end
       File.read(path)
     end

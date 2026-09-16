@@ -2,6 +2,8 @@ require "socket"
 
 require "./spec_helper"
 
+{% skip_file unless flag?(:darwin) || flag?(:linux) %}
+
 module TinrelaydReloadProcessSpec
   BUILD_ROOT = File.join(Dir.tempdir, "tinrelayd-reload-spec-#{Process.pid}")
   BINARY     = File.join(BUILD_ROOT, "tinrelayd")
