@@ -204,8 +204,9 @@ Inspect the bridge with
 `journalctl --user -u tinrelay-codex-bridge.service`.
 
 The shared `codex-bridge` owns stock runtime discovery and the platform-specific
-transport to Codex. Its macOS default is qualified. Linux and Windows ports are in
-progress; do not treat them as supported until their host qualification is complete.
+transport to Codex. Its macOS, Linux, and Windows transports are qualified. TinRelay
+provides unattended service examples for macOS and Linux; run the bridge manually
+on Windows until a Windows service definition is added.
 
 ## Implementation boundary
 

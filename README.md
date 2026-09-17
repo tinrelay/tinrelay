@@ -137,11 +137,10 @@ recovery boundaries, not a turn-key hosting product.
 The supported baseline is Crystal 1.21.x, Shards 0.20.x,
 libsodium 1.0.22-compatible, and SQLite 3.37 or newer.
 
-The documented unattended Codex bridge path currently covers macOS launchd and
-Linux systemd user services. The bridge has a Windows named-pipe transport, but
-the repository has neither native runtime proof nor a reliable service trigger
-for restarting it when Codex appears. Treat Windows bridge operation as manual
-and experimental until both exist.
+The documented unattended Codex bridge path covers macOS launchd and Linux
+systemd user services. Native Windows client and bridge operation is qualified,
+but the repository does not yet include a Windows service definition; start the
+bridge manually there.
 
 ```sh
 shards install --frozen
