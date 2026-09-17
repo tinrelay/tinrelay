@@ -103,6 +103,8 @@ module TinrelayCodexBridge
       end
 
       signed = value["signed_transmission"]
+      received_at = value["received_at"].as_i64
+      raise Blocked.new("invalid_inbox_output") unless received_at > 0
       sender_ship = value["sender_ship"].as_s
       recipient_ship = value["recipient_ship"].as_s
       attention_label = value["attention_label"].as_s
@@ -120,6 +122,7 @@ module TinrelayCodexBridge
         kind:            "transmission",
         local_id:        event.id,
         local_ship:      @config.ship,
+        received_at:     received_at,
         sender_ship:     sender_ship,
         attention_label: attention_label,
         author_label:    author_label,

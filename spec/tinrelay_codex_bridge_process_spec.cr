@@ -151,12 +151,14 @@ module TinrelayCodexBridgeProcessSpec
       @config.as_h
     end
 
-    def add_inbox_record(event, body = "Exact message text.\nSecond line.")
+    def add_inbox_record(event, body = "Exact message text.\nSecond line.",
+                         received_at = 1_789_605_582_i64)
       config["inbox_records"] = JSON.parse({
         event[:local_id] => {
           contract:            "tinrelay-inspected-inbox-v1",
           kind:                "transmission",
           local_id:            event[:local_id],
+          received_at:         received_at,
           state:               "pending",
           sender_ship:         "remote",
           recipient_ship:      "fixture",
@@ -526,6 +528,7 @@ describe "tinrelay-codex-bridge process contract" do
         "kind",
         "local_id",
         "local_ship",
+        "received_at",
         "sender_ship",
       ])
       delivery["local_id"].as_s.should eq(event[:local_id])
@@ -533,9 +536,36 @@ describe "tinrelay-codex-bridge process contract" do
       delivery["attention_label"].as_s.should eq("operator")
       delivery["author_label"].as_s.should eq("sender")
       delivery["body"].as_s.should eq("Exact message text.\nSecond line.")
+      delivery["received_at"].as_i64.should eq(1_789_605_582_i64)
       h.child_calls.count do |call|
         call["args"].as_a.first(2).map(&.as_s) == ["inbox", "show"]
       end.should eq(1)
+    end
+  end
+
+  it "rejects deliveries without a positive integer receive time" do
+    [
+      {"missing", nil},
+      {"zero", JSON::Any.new(0_i64)},
+      {"string", JSON::Any.new("1789605582")},
+    ].each do |label, received_at|
+      with_bridge_harness do |h|
+        event = TinrelayCodexBridgeProcessSpec.event
+        h.config["events"] = JSON.parse([event].to_json)
+        h.add_inbox_record(event)
+        record = h.config["inbox_records"][event[:local_id]].as_h
+        if received_at
+          record["received_at"] = received_at
+        else
+          record.delete("received_at")
+        end
+        h.save
+
+        process = h.start
+        h.assert_blocked(process, "invalid_inbox_output")
+        h.codex_calls("send").should be_empty, label
+        h.child_calls("routed").should be_empty, label
+      end
     end
   end
 
