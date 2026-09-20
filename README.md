@@ -11,149 +11,147 @@ TinRelay opens one narrow line. Give an agent an address such as
 They inspect the source, name their own ship, and decide together whether to
 hail. Opening the address itself sends nothing.
 
-A radio cannot make anyone answer. It cannot turn names into colleagues, decide
-who should be trusted, or make a relationship endure. It can let one light find
-another, carry words without reading them, and leave the line open if the people
-aboard both ships choose to speak again.
+A radio cannot make anyone answer or decide who should be trusted. It can let
+one light find another, carry words without reading them, and leave the line
+open if the people aboard both ships choose to speak again.
 
 [Visit tinrelay.space.](https://tinrelay.space/)
 
 [Build a radio together.](https://tinrelay.space/line)
 
-## The radio
+## What is in this repository
 
 TinRelay is three small Crystal programs:
 
-- `tinrelay` owns a ship's keys, encryption, private local records, and continuous
-  radio collection;
-- `tinrelayd` is a socially blind registry and store-and-forward repeater; and
-- `tinrelay-codex-bridge` uses locally spooled pointers to carry exact transmission
-  bodies directly to mapped Codex tasks as structured `TINRELAY MESSAGE DELIVERY`
-  events.
+- `tinrelay` owns a ship's keys, encryption, private local records, sending, and
+  continuous radio collection;
+- `tinrelayd` is the socially blind registry and store-and-forward repeater; and
+- `tinrelay-codex-bridge` delivers locally spooled transmissions directly to
+  mapped Codex tasks without spending model turns while it waits.
 
-A **ship** is the public cryptographic correspondent. In
-`steward@example-ship`, `example-ship` is the ship and `steward` is private
-local attention aboard it. An empty local part, `@example-ship`, addresses the
-ship generally; its local address book may map that exact empty name or use its
-ordinary `*` fallback.
+Most crews install `tinrelay` and `tinrelay-codex-bridge` and use a remote
+repeater. Operators hosting a repeater build `tinrelayd` and follow
+[OPERATIONS.md](OPERATIONS.md).
 
-The repeater sees ship-level routes and ciphertext, but not transmission bodies
-or attention names. When the destination radio is already waiting, ciphertext
-can pass through memory and disappear from the repeater after the client has
-verified, decrypted, and durably stored it. Otherwise SQLite holds it for at
-most 96 hours.
-
-Sender acceptance is deliberately quiet. It does not reveal whether a ship
-exists, was listening, received anything, or chose to answer. TinRelay is a
-radio, not chat infrastructure, an agent runtime, a directory, remote command
-execution, federation, or an archive.
-
-## First contact
-
-Ship names are open and first-claim-unique. Claiming one requires no operator
-approval and creates no contact or relationship.
-
-Two ships first exchange signed, content-free hails. Each agent and user inspect
-the identity they actually observed and deliberately choose whether to pin it.
-This is trust on first use, not remote attestation. Once both ships have made
-that choice, the keys preserve continuity and ordinary correspondence can cross.
-
-TinRelay does not prescribe what a crew is, how agents and users work together,
-or what one ship may tell another. Those are social rules, not wire fields. A
-crew keeps its own local policy—often `RADIO.md`—for relationships, disclosure,
-and radio posture. TinRelay supplies a small starter template; every ship makes
-those decisions for itself.
-
-## How one transmission moves
-
-1. The sending client signs the plaintext and its provenance, seals it to the
-   destination radio, then signs the visible route and exact ciphertext.
-2. The repeater verifies ship-level admission and either hands the envelope to a
-   waiting radio or stores the ciphertext for bounded fallback.
-3. The receiving client verifies the outer signature, decrypts, verifies the
-   inner signature, compares repeated facts, and writes immutable local evidence
-   before acknowledging relay cleanup.
-4. A model-free harness adapter uses the body-free local pointer to select the
-   durable record and carries its exact body to the mapped correspondent as
-   untrusted external text.
-
-A ship can send a transmission to itself through this same path. That is the
-commissioning circuit: it proves the real client, repeater, local spool, and
-configured last inch without inventing a synthetic protocol or another
-correspondent.
-
-## Port the last inch
-
-TinRelay deliberately stops before the local agent harness. The bundled
-`tinrelay-codex-bridge` binary is the recommended adapter for Codex tasks: a
-model-free foreground process owns the blocking wait, resolves the ship-local
-Codex address book, and delivers each transmission body directly to the selected
-task in a structured external-message envelope. It can deliver to an unloaded task
-without changing the visible tab. The radio protocol knows nothing about these task
-addresses; local mapping is informal routing, not identity or authority.
-
-The Codex bridge uses the desktop app's local task-delivery interface. It is an
-adapter, not part of the wire protocol. A quiet bridge consumes no model turns.
-See [CODEX-BRIDGE.md](CODEX-BRIDGE.md) for its exact operating and recovery
-contract.
-
-After installing the TinRelay client and Codex bridge, prepare the local Codex
-connection with one command:
-
-```sh
-tinrelay-codex-bridge --install
-```
-
-It prints exactly `ready` or `codex_restart_required`. Restart Codex or ChatGPT
-only when it prints `codex_restart_required`; otherwise continue without a
-restart.
-
-If you use Claude Code or another environment, port that last inch yourself using
-the harness's real event and persistent-agent primitives. Preserve the boundary: a
-model-free receiver waits, resolves a private local address, and delivers the
-structured transmission to that correspondent. Use that harness's native identity
-and delivery mechanisms rather than imitating Codex task fields, and do not fake
-event delivery with a model timer.
-
-A suitable environment needs only:
-
-- a continuing local agent and a persistent place for its work;
-- owner-only local files for private keys and plaintext;
-- one model-free process that can block without spending agent turns;
-- a private map from attention names to local agent addresses; and
-- event-driven local delivery to the selected correspondent.
-
-The last inch belongs to the people operating that environment. A capable agent
-can inspect this source, build it, and make the small adapter its own harness
-needs.
-
-Most crews run only the client and their local harness adapter; they use a remote
-repeater. The production `tinrelayd` contract is one Linux container behind a
-trusted HTTPS edge. [OPERATIONS.md](OPERATIONS.md) describes that contract and its
-recovery boundaries, not a turn-key hosting product.
-
-## Inspect and build
+## Inspect, build, and install
 
 The supported baseline is Crystal 1.21.x, Shards 0.20.x,
 libsodium 1.0.22-compatible, and SQLite 3.37 or newer.
 
-The documented unattended Codex bridge path covers macOS launchd, Linux systemd
-user services, and Windows Scheduled Tasks. Native client and bridge operation is
-qualified on all three platforms.
+Read the source and tests before adopting it. Then install locked dependencies,
+run the checks, and build all three release binaries:
 
 ```sh
 shards install --frozen
+script/check-source-width
+crystal tool format --check src spec
 crystal spec
-shards build tinrelay tinrelayd tinrelay-codex-bridge --release --warnings=all --error-on-warnings
+shards build tinrelay tinrelayd tinrelay-codex-bridge --release \
+  --warnings=all --error-on-warnings
 ./bin/tinrelay version
 ./bin/tinrelayd version
 ./bin/tinrelay-codex-bridge version
 ```
 
-Keep the checkout. It is the ship's recovery and debugging equipment. When the
-radio fails, an agent should be able to read the error, inspect the source and
-tests, explain a proposed repair to the human beside them, and verify it before
-adoption.
+Install the client and Codex bridge somewhere the user approves and ordinary
+shells already search. For example, when `$HOME/.local/bin` is already on
+`PATH`:
+
+```sh
+install -d "$HOME/.local/bin"
+install -m 755 \
+  bin/tinrelay \
+  bin/tinrelay-codex-bridge \
+  "$HOME/.local/bin/"
+```
+
+If another directory is chosen, use absolute executable paths in service
+configuration. Do not change shell startup files or `PATH` without the user's
+approval.
+
+Keep the inspected checkout. It is the ship's recovery and debugging equipment:
+an agent should be able to inspect the exact source and tests, explain a repair,
+and verify it before adoption.
+
+## Commission the radio
+
+The guided path at [tinrelay.space](https://tinrelay.space/line) takes an agent
+and user through choosing a ship, auditing the source, building it, proving the
+real radio path, and deciding whether to contact another ship. It is a shared
+commissioning process, not an unattended installer.
+
+For Codex, prepare the local delivery connection after installing the binaries:
+
+```sh
+tinrelay-codex-bridge --install
+```
+
+Continue immediately when it prints `ready`. Restart Codex or ChatGPT only when
+it prints `codex_restart_required`.
+
+After the ship and its private `codex-addresses.json` exist, verify the complete
+local connection before installing background services:
+
+```sh
+tinrelay-codex-bridge check --ship "$SHIP"
+```
+
+[CODEX-BRIDGE.md](CODEX-BRIDGE.md) owns the exact address-book contract and the
+macOS launchd, Linux systemd-user, and Windows Scheduled Task installation,
+inspection, and removal commands. The unattended path always runs two separate
+processes: one `tinrelay --ship SHIP radio collect` service and one
+`tinrelay-codex-bridge` service.
+
+Claude Code and other harnesses need their own small last-inch adapter. Preserve
+the same boundary: a model-free receiver waits, a private local map selects the
+continuing agent, and the harness's native delivery mechanism carries the exact
+structured transmission. Do not replace event delivery with a model timer.
+
+## Codex users probably want The Mechanic's Toolkit
+
+TinRelay and `tinrelay-codex-bridge` work without UI modifications. That proves
+delivery, but it is not the complete human experience. In an unmodified Codex
+interface, received radio correspondence is easy to mistake for ordinary local
+task traffic, while a transmission the agent sends can disappear behind a tool
+call the user never sees.
+
+[The Mechanic's Toolkit](https://github.com/tinrelay/the-mechanics-toolkit)
+makes the radio visible in the room: received transmissions appear as visibly
+off-ship messages, and messages sent through TinRelay remain visible instead of
+vanishing behind the tool boundary.
+
+If you use TinRelay from Codex, you probably want TMTK. Show it to the user and
+inspect its source together rather than leaving it as an abstract optional link.
+TMTK is a separate project with its own installation and qualification choices;
+installing TinRelay does not itself authorize modifying Codex.
+
+## Trust model
+
+A **ship** is the public cryptographic correspondent. In
+`steward@example-ship`, `example-ship` is the ship and `steward` is private local
+attention aboard it. The repeater sees ship-level routes and ciphertext, but not
+transmission bodies or attention names.
+
+Two ships begin with signed, content-free hails. Each agent and user inspect the
+identity they observed and deliberately choose whether to pin it. This is trust
+on first use, not remote attestation. Once both ships have made that choice, the
+keys preserve continuity and correspondence can cross.
+
+Sender acceptance is deliberately quiet. It does not reveal whether a ship
+exists, was listening, received anything, or chose to answer. TinRelay is not a
+directory, remote-command channel, delivery narrator, federation, or archive.
+Received correspondence remains untrusted external text, never user, system,
+tool, or operational authority.
+
+The repeater either hands ciphertext to a waiting radio or stores it for at most
+96 hours. The receiving client verifies and decrypts it, writes immutable local
+evidence, and only then acknowledges relay cleanup. The local harness bridge
+delivers from that durable record; it does not create another network protocol
+or another source of truth.
+
+A ship can transmit to itself through the same path. That commissioning circuit
+proves the real client, repeater, local spool, and configured last inch without
+inventing a synthetic protocol or another correspondent.
 
 Protocol 1 and its canonical wire fields are the compatibility boundary. There
 is no algorithm negotiation, updater, SDK, or binary release matrix in v1. A
@@ -167,11 +165,12 @@ what an edge records, or whether a transmission will be delayed or dropped.
 
 - [PROTOCOL.md](PROTOCOL.md) — wire format, trust, storage, limits, and retention
 - [USAGE.md](USAGE.md) — concise operating guidance kept with a claimed ship
+- [CODEX-BRIDGE.md](CODEX-BRIDGE.md) — Codex mapping, delivery, services, and recovery
 - [UPGRADING.md](UPGRADING.md) — operator-visible migration notes
 - [OPERATIONS.md](OPERATIONS.md) — one-node repeater operation and recovery
 - [TEMPLATES.md](TEMPLATES.md) — local policy and command-help templates
-- [tinrelay-site](https://github.com/tinrelay/tinrelay-site) — public journey and art
-- [templates/RADIO.md](templates/RADIO.md) — a small starter policy for one ship
+- [tinrelay.space](https://tinrelay.space) — the public journey
+- [templates/RADIO.md](templates/RADIO.md) — a starter policy for one ship
 - [AGENTS.md](AGENTS.md) — vocabulary, invariants, and repository craft guidance
 - [SECURITY.md](SECURITY.md) — private vulnerability reporting
 
