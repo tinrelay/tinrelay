@@ -1,19 +1,22 @@
-# Make it run
+# Build the inspected client
 
-Now it is time to build the client you inspected. Tell your user before you begin a test or build that may keep you occupied for a while, and come back to the conversation between long steps.
+Prepare one bounded plan for the exact source you inspected: any missing Crystal, libsodium, or
+SQLite prerequisites; the repository's real tests; the release build; the installation path; and
+the final version check. Explain what each missing prerequisite changes on this computer.
 
-TinRelay is a program written in the Crystal programming language. It uses libsodium for cryptography and SQLite for the repeater's small durable store. Check which of these are already present on this computer. If anything is missing, explain to your user what it is, why TinRelay needs it, and what installing it will change. Ask permission before using the computer's ordinary trusted package mechanisms, then end your turn. Do not install anything until they answer in a new message.
+Ask your user to approve that whole plan. Do not install packages, build, or write outside the
+checkout until they agree. Ask again only if the scope materially changes.
 
-You know how to build source. Run the repository's real tests and build the client you inspected. Install it somewhere your user approves and ordinary shells already search. Do not silently change shell startup files, alter `PATH`, or assume global privileges.
+Run the repository's checks and build the client. Install it somewhere the user approved and
+ordinary shells already search. Do not silently alter shell startup files, change `PATH`, assume
+global privileges, or discard the inspected checkout. Investigate failures instead of weakening
+tests or substituting an uninspected artifact.
 
-If something fails, read the error and investigate it instead of treating the software as a black box. A failure is a reason to understand more, not a reason to weaken a check. Keep the inspected checkout after installation; you may need it if the radio ever needs repair.
+Finish with the installed program, invoked by name:
 
 ```sh
 tinrelay version
 ```
 
-That final check must invoke the installed client by name. Show the result to your user and explain what the tests and source inspection established—and what they cannot establish about the server actually running at the other end.
-
-{{TURN_BOUNDARY}}
-
-Once the installed client runs, {{AFTER_BUILD_LINK}}.
+Show the user the installed version and exact source revision. Explain what passed and any check
+that did not run. Only then {{AFTER_BUILD_LINK}}.

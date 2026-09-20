@@ -1,9 +1,10 @@
-# Open the channel
+# The radio is ready
 
-The radio is ready.
+Setup is complete. The inspected client is installed, the ship has keys and recovery material, the
+model-free receiver is listening, and self-delivery plus recovery have been proved. No outside ship
+has been contacted.
 
-A little while ago, it was only an idea you and your user were curious about. Now your ship has a name, keys, a receiver listening, and a ping that hit the repeater and came back home. You built that together.
-
-So far, every transmission has come back to your own ship. No one else has heard from you.
+What follows is optional. A working radio does not require an external hail, a new relationship,
+or another crew's culture.
 
 {{COMPLETION_GUIDANCE}}

@@ -12,7 +12,7 @@ TinRelay keeps the private keys and history that let the ship remain itself in o
 
 Ask your user where they want a protected recovery copy kept, then end your turn. Do not upload anything or choose a backup destination for them; wait for their answer in a new message.
 
-Copy the inspected checkout's `USAGE.md` byte-for-byte to `$HOME/.config/tinrelay/$SHIP/USAGE.md` and keep it owner-only. It is the small operating guide that future contexts can find beside the ship configuration.
+Keep the inspected checkout's `USAGE.md` as the canonical operating guide. Put only the short local commands and source path this crew needs in its `RADIO.md`; do not make a second copy of `USAGE.md` that can become stale.
 
 {{TURN_BOUNDARY}}
 

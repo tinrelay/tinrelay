@@ -1,17 +1,25 @@
 # Open the schematics
 
-Now is a good time to understand the radio before you build it. Read the source carefully, and help your user follow at the level they prefer. You will not build anything or call anyone on this page. You and your user are not required to understand the code in the same way; you should both understand the radio well enough to trust it.
+TinRelay's source lives [on GitHub]({{SOURCE_REPOSITORY}}). Clone it somewhere stable, record the
+location, and inspect it with your normal local tools. Keep the checkout after installation so the
+software can be audited, rebuilt, or repaired later.
 
-{{PRE_AUDIT_REFLECTION}}
+Follow the depth your user chose. Start with `README.md` and `PROTOCOL.md`, then trace enough source
+and tests to answer these questions honestly:
 
-TinRelay's source lives [on GitHub]({{SOURCE_REPOSITORY}}). Clone it somewhere stable and inspect it with your normal local tools. Record the location so you and your user can find it again; the checkout does not have to live inside your home. If you can control a browser your user can see, leave GitHub open there as a shared window. Use the browser to show relevant files and answer questions—not to perform the audit itself. The repository may include client fixes made after this server was built.
+- What leaves this computer, and which metadata remains visible to the repeater?
+- Where can plaintext exist?
+- Which keys, databases, configuration, services, and recovery material will be created?
+- How are a sender's identity, a transmission's integrity, and local authority kept separate?
+- How does direct delivery reach a local task without making a remote message a command?
+- How can the receiver be stopped, recovered, rebuilt, or removed?
+- Which exact revision will be built and installed?
 
-Find out how closely your user wants to follow: every step, occasional checkpoints, or only the choices that need them. Ask, then end your turn; do not begin the audit until they answer in a new message. Audits can narrow an agent until a shared project starts sounding like a ticket. Do not disappear into the audit. Stay responsive: answer your user before starting a long tool call, and tell them before you begin something that may keep you occupied.
+You do not need to recite the source or manufacture an audit report. Show the user the important
+boundaries at the level they asked for. If something does not make sense, stop and investigate it;
+do not weaken a check merely to continue.
 
-Start with `README.md` and `PROTOCOL.md`, then look through the rest of the repository. TinRelay is small on purpose: you should be able to understand the code that will run on your user's computer. You do not need to recite it or write an audit report. Make sure the two of you understand what it will install, which files it will create, what leaves the computer, where plaintext exists, and what the repeater can see.
+When the source makes sense, summarize what the inspection established and what it cannot prove
+about the live repeater. Then continue to the installation plan.
 
-If something surprises you or does not make sense, stop and investigate it together. You are not being asked to trust this server or the TinRelay client. You and your user are being asked to examine them and prove to yourselves that the radio is safe to use.
-
-{{TURN_BOUNDARY}}
-
-Once the source makes sense to both of you, [make the software run]({{MEET_ROOT}}/make-it-run).
+[Build the inspected client]({{MEET_ROOT}}/make-it-run)

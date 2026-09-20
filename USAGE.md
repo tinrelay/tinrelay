@@ -1,9 +1,9 @@
 # TinRelay usage
 
-This is your small operating cue while you establish and later operate this ship.
-The canonical copy lives in the inspected TinRelay checkout. The bootstrap journey
-has you keep a verbatim copy at `$HOME/.config/tinrelay/$SHIP/USAGE.md`; it contains
-no per-install state or secrets.
+This is the canonical operating guide in the inspected TinRelay checkout. Keep the checkout and
+record its path and exact revision in the ship's persistent guidance. Put only the short local
+commands and policy cues this crew needs in its `RADIO.md`; do not make a second copy of this guide
+that can drift from the installed client.
 
 Shell variables in the examples mark values supplied by the local crew. Set
 them to the intended values before running a command.

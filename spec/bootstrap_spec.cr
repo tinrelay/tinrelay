@@ -466,29 +466,16 @@ describe "the canonical bootstrap representations" do
           open-the-schematics
           make-it-run
           name-the-ship
-          keep-the-keys
-          tune-the-radio
           hear-the-ping
-          return-to-silence
           open-the-channel
-          the-line-stays-open
-          notes-from-the-mechanic
         ),
         "first-light" => %w(
           first-light
-          talk-together
-          find-a-place
           open-the-schematics
           make-it-run
-          take-a-pulse
           name-the-ship
-          keep-the-keys
-          tune-the-radio
           hear-the-ping
-          return-to-silence
           open-the-channel
-          the-line-stays-open
-          notes-from-the-mechanic
         ),
       }
 
@@ -500,7 +487,7 @@ describe "the canonical bootstrap representations" do
       mentorless_entry.headers["Set-Cookie"]?.should be_nil
 
       journeys.each do |journey, actions|
-        actions.each do |action|
+        actions.each_with_index do |action, index|
           suffix = action == journey ? journey : "#{journey}/#{action}"
           markdown = HTTP::Client.get(
             "#{origin}/line/#{suffix}",
@@ -509,17 +496,16 @@ describe "the canonical bootstrap representations" do
           markdown.status_code.should eq(200)
           markdown.body.should_not match(/\{\{[A-Z_]+\}\}/)
           markdown.headers["X-Robots-Tag"].should contain("noindex")
+          markdown.body.should contain("step #{index + 1} of #{actions.size}")
+          markdown.body.should contain("[this page](/line/#{suffix})")
+          markdown.body.should contain("[full flight plan](/line/flight-plan)")
         end
       end
 
       [nil, "steward@harbor"].each do |coordinate|
         base = coordinate ? "/steward%40harbor" : "/line"
         journeys.each_key do |journey|
-          [
-            {"tune-the-radio", "hear-the-ping"},
-            {"hear-the-ping", "return-to-silence"},
-            {"return-to-silence", "open-the-channel"},
-          ].each do |action, next_action|
+          [{"hear-the-ping", "open-the-channel"}].each do |action, next_action|
             rendered = api.bootstrap_page.markdown(
               coordinate, action, journey, repeater_origin: origin
             )
@@ -586,13 +572,25 @@ describe "the canonical bootstrap representations" do
       head.body.should be_empty
       HTTP::Client.get("#{origin}/#{encoded}/first-light/unknown").status_code.should eq(404)
       HTTP::Client.get("#{origin}/line/open-the-schematics").status_code.should eq(404)
+
+      Tinrelay::BootstrapPage::OPTIONAL_ACTIONS.each do |action|
+        journeys.each_key do |journey|
+          response = HTTP::Client.get(
+            "#{origin}/line/#{journey}/#{action}",
+            headers: HTTP::Headers{"Accept" => "text/markdown"}
+          )
+          response.status_code.should eq(200)
+          response.body.should_not match(/\{\{[A-Z_]+\}\}/)
+          response.body.should_not contain("full flight plan")
+        end
+      end
     end
   end
 
   it "renders the claim command for the public origin that served the journey" do
     TinrelaySpec.with_server do |_root, origin, _api|
       direct = HTTP::Client.get(
-        "#{origin}/line/already-aboard/keep-the-keys",
+        "#{origin}/line/already-aboard/name-the-ship",
         headers: HTTP::Headers{"Accept" => "text/markdown"}
       )
       direct.status_code.should eq(200)
@@ -601,7 +599,7 @@ describe "the canonical bootstrap representations" do
       )
 
       proxied = HTTP::Client.get(
-        "#{origin}/line/already-aboard/keep-the-keys",
+        "#{origin}/line/already-aboard/name-the-ship",
         headers: HTTP::Headers{
           "Accept"            => "text/markdown",
           "Host"              => "tinrelay.space",
@@ -615,7 +613,7 @@ describe "the canonical bootstrap representations" do
       proxied.body.should_not contain("{{REPEATER_ORIGIN}}")
 
       unsafe = HTTP::Client.get(
-        "#{origin}/line/already-aboard/keep-the-keys",
+        "#{origin}/line/already-aboard/name-the-ship",
         headers: HTTP::Headers{
           "Accept" => "text/markdown",
           "Host"   => "tinrelay.space$(false)",

@@ -13,33 +13,24 @@ module Tinrelay
         open-the-schematics
         make-it-run
         name-the-ship
-        keep-the-keys
-        tune-the-radio
         hear-the-ping
-        return-to-silence
         open-the-channel
-        the-line-stays-open
-        notes-from-the-mechanic
       ),
       "first-light" => %w(
         first-light
-        talk-together
-        find-a-place
         open-the-schematics
         make-it-run
-        take-a-pulse
         name-the-ship
-        keep-the-keys
-        tune-the-radio
         hear-the-ping
-        return-to-silence
         open-the-channel
-        the-line-stays-open
-        notes-from-the-mechanic
       ),
     }
+    OPTIONAL_ACTIONS = %w(
+      the-line-stays-open
+      notes-from-the-mechanic
+    )
     JOURNEYS          = JOURNEY_ACTIONS.keys
-    ACTIONS           = JOURNEY_ACTIONS.values.flatten.uniq
+    ACTIONS           = (JOURNEY_ACTIONS.values.flatten + OPTIONAL_ACTIONS).uniq
     PAGE_KEYS         = (["home", "meet", "not-found"] + ACTIONS).uniq
     FLIGHT_PLAN_PAGE  = "flight-plan"
     SHOW_RADIO_STATUS = false
@@ -62,7 +53,8 @@ module Tinrelay
     end
 
     def self.action_allowed?(journey : String, action : String) : Bool
-      JOURNEY_ACTIONS[journey]?.try(&.includes?(action)) || false
+      return false unless JOURNEY_ACTIONS.has_key?(journey)
+      JOURNEY_ACTIONS[journey].includes?(action) || OPTIONAL_ACTIONS.includes?(action)
     end
 
     def markdown(coordinate : String? = nil, action : String? = nil,
@@ -84,20 +76,12 @@ module Tinrelay
         source = replace_once(
           source, "{{SOURCE_REPOSITORY}}", markdown_link_destination(source_repository)
         )
-        reflection = if journey == "first-light"
-                       File.read(File.join(directory, "first-light-pre-audit-reflection.md"))
-                     else
-                       ""
-                     end
-        source = replace_once(source, "{{PRE_AUDIT_REFLECTION}}", reflection)
       when "make-it-run"
-        next_action = journey == "first-light" ? "take-a-pulse" : "name-the-ship"
-        label = journey == "first-light" ? "take a breath before moving on" : "name the ship"
         source = replace_once(
           source, "{{AFTER_BUILD_LINK}}",
-          "[#{label}](#{line_root(coordinate, journey)}/#{next_action})"
+          "[set up the ship](#{line_root(coordinate, journey)}/name-the-ship)"
         )
-      when "keep-the-keys"
+      when "name-the-ship"
         origin = repeater_origin ||
                  raise Invalid.new("bootstrap repeater origin is missing")
         source = replace_once(
@@ -116,20 +100,10 @@ module Tinrelay
         if coordinate
           completion = replace_all(completion, "{{MENTOR}}", markdown_code(coordinate))
         end
-        naming_name = if coordinate
-                        "first-light-directed-naming.md"
-                      else
-                        "first-light-mentorless-naming.md"
-                      end
-        naming = journey == "first-light" ? File.read(File.join(directory, naming_name)) : ""
-        completion = replace_once(completion, "{{FIRST_LIGHT_NAMING}}", naming)
         completion = replace_all(completion, "{{MEET_ROOT}}", line_root(coordinate, journey))
         source = replace_once(source, "{{COMPLETION_GUIDANCE}}", completion)
       end
-      if source.includes?("{{TURN_BOUNDARY}}")
-        boundary = File.read(File.join(directory, "continue-together.md"))
-        source = replace_all(source, "{{TURN_BOUNDARY}}", boundary.rstrip)
-      end
+      source = add_journey_progress(source, coordinate, journey, action)
       site_markdown(source)
     rescue ex : File::NotFoundError
       raise NotFound.new("bootstrap content is not configured")
@@ -420,6 +394,38 @@ module Tinrelay
     private def line_root(coordinate : String?, journey : String?) : String
       root = coordinate ? "/#{URI.encode_path_segment(coordinate)}" : "/line"
       journey ? "#{root}/#{journey}" : root
+    end
+
+    private def add_journey_progress(source : String, coordinate : String?,
+                                     journey : String?, action : String?) : String
+      return source unless journey && action
+      actions = JOURNEY_ACTIONS[journey]? || return source
+      index = actions.index(action) || return source
+      title = source_title(source)
+      journey_title = journey.split('-').map(&.capitalize).join(' ')
+      current_path = line_root(coordinate, journey)
+      current_path = "#{current_path}/#{action}" unless action == journey
+      remaining = actions[(index + 1)..].map do |remaining_action|
+        source_title(
+          File.read(File.join(File.dirname(common_path), "#{remaining_action}.md"))
+        )
+      end
+      remaining_line = if remaining.empty?
+                         "No setup steps remain."
+                       else
+                         "Remaining: #{remaining.join(" → ")}"
+                       end
+      progress = <<-MARKDOWN
+
+        > **#{journey_title} · step #{index + 1} of #{actions.size} — #{title}**
+        >
+        > #{remaining_line}
+        >
+        > Resume: [this page](#{current_path}) ·
+        > [full flight plan](#{line_root(coordinate, nil)}/#{FLIGHT_PLAN_PAGE})
+        MARKDOWN
+      first_line_end = source.index('\n') || source.bytesize
+      source[0...first_line_end] + progress + source[first_line_end..]
     end
 
     private def validate_journey!(journey : String?, action : String?) : Nil

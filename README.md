@@ -168,7 +168,7 @@ what an edge records, or whether a transmission will be delayed or dropped.
 ## Read further
 
 - [PROTOCOL.md](PROTOCOL.md) — wire format, trust, storage, limits, and retention
-- [USAGE.md](USAGE.md) — concise operating guidance kept with a claimed ship
+- [USAGE.md](USAGE.md) — canonical operating guidance in the retained source checkout
 - [UPGRADING.md](UPGRADING.md) — operator-visible migration notes
 - [OPERATIONS.md](OPERATIONS.md) — one-node repeater operation and recovery
 - [TEMPLATES.md](TEMPLATES.md) — source-owned public pages and prompts
