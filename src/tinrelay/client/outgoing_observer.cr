@@ -1,6 +1,6 @@
 require "json"
 
-require "./platform/outgoing_observer_transport"
+require "../platform/outgoing_observer_transport"
 
 module Tinrelay
   class OutgoingObserver

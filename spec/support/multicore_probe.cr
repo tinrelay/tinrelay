@@ -1,6 +1,6 @@
 require "file_utils"
-require "../../src/tinrelay/client_runtime"
-require "../../src/tinrelay/server"
+require "../../src/tinrelay/client/runtime"
+require "../../src/tinrelay/server/server"
 
 class ProbeMetrics
   @mutex = Mutex.new

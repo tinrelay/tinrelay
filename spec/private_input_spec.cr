@@ -1,5 +1,5 @@
 require "./spec_helper"
-require "../src/tinrelay/private_input"
+require "../src/tinrelay/client/private_input"
 
 describe Tinrelay::PrivateInput do
   it "accepts owner-only files and protected stdin without retaining line endings" do

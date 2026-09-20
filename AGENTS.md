@@ -10,6 +10,13 @@ The public journey and its art live in the sibling `tinrelay-site` repository.
 TinRelay owns the client, bridge, and API server; it must not serve HTML or own
 the site's route sequence, prose, rendering, CSS, or JavaScript.
 
+The source tree follows those runtime boundaries. Shared protocol, model, crypto,
+and local-platform primitives live directly under `src/tinrelay/`; client code
+lives under `src/tinrelay/client/`; repeater code lives under
+`src/tinrelay/server/`; and the Codex adapter remains under
+`src/tinrelay_codex_bridge/`. Keep path ownership distinct without multiplying
+the existing `Tinrelay` namespace merely to mirror directories.
+
 ## Begin with the product
 
 Read `README.md` and `PROTOCOL.md`, then the source and tests governing the

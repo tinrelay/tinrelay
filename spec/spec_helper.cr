@@ -1,8 +1,8 @@
 require "spec"
 require "file_utils"
-require "../src/tinrelay/client_runtime"
-require "../src/tinrelay/legacy_key_migration"
-require "../src/tinrelay/server"
+require "../src/tinrelay/client/runtime"
+require "../src/tinrelay/client/legacy_key_migration"
+require "../src/tinrelay/server/server"
 require "./support/legacy_key_files"
 {% if flag?(:win32) %}
   require "./support/windows_acl"

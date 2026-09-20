@@ -1,4 +1,4 @@
-require "./error"
+require "../error"
 
 module Tinrelay
   module BodyInput

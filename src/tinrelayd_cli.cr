@@ -1,4 +1,4 @@
-require "./tinrelay/server"
+require "./tinrelay/server/server"
 
 module Tinrelay
   module ServerCLI

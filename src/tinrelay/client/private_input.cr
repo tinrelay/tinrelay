@@ -1,4 +1,4 @@
-require "./platform/private_storage"
+require "../platform/private_storage"
 
 module Tinrelay
   module PrivateInput

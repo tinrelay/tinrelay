@@ -1,9 +1,9 @@
 require "io/console"
 
-require "./tinrelay/client_runtime"
-require "./tinrelay/body_input"
-require "./tinrelay/legacy_key_migration"
-require "./tinrelay/private_input"
+require "./tinrelay/client/runtime"
+require "./tinrelay/client/body_input"
+require "./tinrelay/client/legacy_key_migration"
+require "./tinrelay/client/private_input"
 
 module Tinrelay
   module CLI

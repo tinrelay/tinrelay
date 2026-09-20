@@ -1,9 +1,9 @@
 require "http/client"
 
-require "./platform/private_storage"
-require "./protocol"
+require "../platform/private_storage"
+require "../protocol"
 require "./local_paths"
-require "./atomic_private_file"
+require "../atomic_private_file"
 require "./keyring"
 require "./outgoing_observer"
 require "./spool"

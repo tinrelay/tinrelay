@@ -1,4 +1,4 @@
-require "../../src/tinrelay/client_runtime"
+require "../../src/tinrelay/client/runtime"
 
 spool = Tinrelay::Spool.new(ARGV[0])
 spool.with_radio_lock do

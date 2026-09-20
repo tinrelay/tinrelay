@@ -1,4 +1,4 @@
-require "./client_runtime"
+require "./runtime"
 
 module Tinrelay
   @[Link("sodium")]

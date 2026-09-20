@@ -1,5 +1,5 @@
 require "./spec_helper"
-require "../src/tinrelay/body_input"
+require "../src/tinrelay/client/body_input"
 
 describe Tinrelay::BodyInput do
   it "reads exact body bytes from stdin" do

@@ -13,10 +13,10 @@ describe "the client compilation boundary" do
     dependencies = output.to_s.each_line.map do |line|
       Path.new(line.strip).to_posix.to_s
     end
-    dependencies.should contain("src/tinrelay/client.cr")
-    dependencies.should_not contain("src/tinrelay/database.cr")
-    dependencies.should_not contain("src/tinrelay/store.cr")
-    dependencies.should_not contain("src/tinrelay/api.cr")
-    dependencies.should_not contain("src/tinrelay/direct_handoff.cr")
+    dependencies.should contain("src/tinrelay/client/client.cr")
+    dependencies.should_not contain("src/tinrelay/server/database.cr")
+    dependencies.should_not contain("src/tinrelay/server/store.cr")
+    dependencies.should_not contain("src/tinrelay/server/api.cr")
+    dependencies.should_not contain("src/tinrelay/server/direct_handoff.cr")
   end
 end
