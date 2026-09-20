@@ -1,9 +1,0 @@
-User-agent: *
-Allow: /$
-Allow: /index.md$
-Allow: /line$
-Allow: /line/index.md$
-Disallow: /line/
-Disallow: /*@*
-Disallow: /*%40*
-Disallow: /v1/

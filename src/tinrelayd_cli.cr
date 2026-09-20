@@ -34,9 +34,6 @@ module Tinrelay
       database_path = required(argv, "--database")
       bind = extract(argv, "--bind") || "127.0.0.1"
       port = (extract(argv, "--port") || "8787").to_i
-      template = extract(argv, "--bootstrap-template") || "templates/common-bootstrap.md"
-      source_repository = extract(argv, "--source-repository") ||
-                          "https://github.com/tinrelay/tinrelay"
       configuration_path = extract(argv, "--config") || extract(argv, "-c")
       threads = ServerRuntime.thread_count(extract(argv, "--threads"))
       permanent_metadata_limit = numeric(
@@ -47,8 +44,7 @@ module Tinrelay
       no_extra!(argv)
       ServerRuntime.enable_multicore(threads)
       config = ServerConfig.new(
-        bind, port, database_path, template,
-        source_repository, threads, permanent_metadata_limit,
+        bind, port, database_path, threads, permanent_metadata_limit,
         configuration_path
       )
       api = API.new(config)

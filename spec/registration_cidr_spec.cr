@@ -7,10 +7,6 @@ module TinrelayRegistrationCIDRSpec
   def self.write_config(path : String, mode : String,
                         trusted : Array(String), denied : Array(String)) : Nil
     File.write(path, {
-      site: {
-        site_name: "TinRelay", base_url: "https://tinrelay.space",
-        wordmark: "Tin Relay", art_manifest_path: nil,
-      },
       registration: {
         deny_cidrs: denied,
       },
@@ -26,9 +22,7 @@ module TinrelayRegistrationCIDRSpec
     path = File.join(root, "tinrelayd.json")
     write_config(path, mode, trusted, denied)
     config = Tinrelay::ServerConfig.new(
-      "127.0.0.1", 0, File.join(root, "service.db"),
-      File.expand_path("../templates/common-bootstrap.md", __DIR__),
-      "https://example.test/tinrelay.git", System.cpu_count,
+      "127.0.0.1", 0, File.join(root, "service.db"), System.cpu_count,
       Tinrelay::DEFAULT_PERMANENT_METADATA_LIMIT, path
     )
     api = Tinrelay::API.new(config)

@@ -27,27 +27,16 @@ module TinrelayRuntimePolicySpec
   def self.server_config(root : String, configuration_path : String) : Tinrelay::ServerConfig
     Tinrelay::ServerConfig.new(
       database_path: File.join(root, "service.db"),
-      bootstrap_template: File.expand_path("../templates/common-bootstrap.md", __DIR__),
-      source_repository: "https://example.test/tinrelay.git",
       configuration_path: configuration_path
     )
   end
 
-  def self.write_site_only(path : String) : Nil
-    File.write(path, {
-      site: {
-        site_name: "First Site", base_url: "https://first.example",
-        wordmark: "First Mark", art_manifest_path: nil,
-      },
-    }.to_json)
+  def self.write_defaults(path : String) : Nil
+    File.write(path, "{}")
   end
 
   def self.write_complete(path : String, exclude = [] of String) : Nil
     File.write(path, {
-      site: {
-        site_name: "Second Site", base_url: "https://second.example",
-        wordmark: "Second Mark", art_manifest_path: nil,
-      },
       registration: {
         global_hour: 301, global_day: 1001,
         per_source_hour: 5, per_source_day: 6,
@@ -64,10 +53,6 @@ module TinrelayRuntimePolicySpec
 
   def self.write_closed(path : String) : Nil
     File.write(path, {
-      site: {
-        site_name: "Closed Site", base_url: "https://closed.example",
-        wordmark: "Closed Mark", art_manifest_path: nil,
-      },
       registration: {
         global_hour: 0, global_day: 0,
         per_source_hour: 0, per_source_day: 0,
@@ -77,10 +62,6 @@ module TinrelayRuntimePolicySpec
 
   def self.write_open_policy(path : String) : Nil
     File.write(path, {
-      site: {
-        site_name: "Updated Site", base_url: "https://updated.example",
-        wordmark: "Updated Mark", art_manifest_path: nil,
-      },
       registration: {
         global_hour: 301, global_day: 1001,
         per_source_hour: 5, per_source_day: 6,
@@ -126,10 +107,10 @@ describe "tinrelayd runtime policy" do
     end
   end
 
-  it "gives a site-only configuration the exact policy defaults" do
+  it "gives an empty configuration the exact policy defaults" do
     root = TinrelaySpec.temporary_root
     path = File.join(root, "tinrelayd.json")
-    TinrelayRuntimePolicySpec.write_site_only(path)
+    TinrelayRuntimePolicySpec.write_defaults(path)
     api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
     begin
       snapshot = api.runtime_snapshot
@@ -150,19 +131,16 @@ describe "tinrelayd runtime policy" do
 
   it "bounds exclusion names before registry validation" do
     names = Array.new(256) { |index| "ship-#{index}" }
-    site = Tinrelay::TinrelaydConfig::Site.new(
-      "TinRelay", "https://tinrelay.space", "Tin Relay"
-    )
     registration = Tinrelay::TinrelaydConfig::Registration.from_json({
       exclude: names,
     }.to_json)
-    config = Tinrelay::TinrelaydConfig.new(site, registration)
+    config = Tinrelay::TinrelaydConfig.new(registration)
     config.rate_limit_exclusions.should eq(names)
 
     registration = Tinrelay::TinrelaydConfig::Registration.from_json({
       exclude: names + ["ship-256"],
     }.to_json)
-    config = Tinrelay::TinrelaydConfig.new(site, registration)
+    config = Tinrelay::TinrelaydConfig.new(registration)
     expect_raises(Tinrelay::Invalid, /too many/) do
       config.rate_limit_exclusions
     end
@@ -171,7 +149,7 @@ describe "tinrelayd runtime policy" do
   it "publishes one complete valid snapshot and retains it after invalid reloads" do
     root = TinrelaySpec.temporary_root
     path = File.join(root, "tinrelayd.json")
-    TinrelayRuntimePolicySpec.write_site_only(path)
+    TinrelayRuntimePolicySpec.write_defaults(path)
     api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
     begin
       prior = api.runtime_snapshot
@@ -179,7 +157,6 @@ describe "tinrelayd runtime policy" do
       api.reload_configuration
       current = api.runtime_snapshot
       current.same?(prior).should be_false
-      current.page.public_url("/").should eq("https://second.example/")
       allowances = current.registration_allowances
       {allowances.global_hour, allowances.global_day}.should eq({301, 1001})
       {allowances.per_source_hour, allowances.per_source_day}.should eq({5, 6})
@@ -190,10 +167,6 @@ describe "tinrelayd runtime policy" do
       current.request_logging?.should be_false
 
       File.write(path, {
-        site: {
-          site_name: "Rejected Site", base_url: "https://rejected.example",
-          wordmark: "Rejected Mark", art_manifest_path: nil,
-        },
         client_address: {
           mode: "trusted_proxy", trusted_ingress_cidrs: [] of String,
         },
@@ -213,7 +186,7 @@ describe "tinrelayd runtime policy" do
   it "publishes reload only outside an active claim commit" do
     root = TinrelaySpec.temporary_root
     path = File.join(root, "tinrelayd.json")
-    TinrelayRuntimePolicySpec.write_site_only(path)
+    TinrelayRuntimePolicySpec.write_defaults(path)
     api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
     begin
       prior = api.runtime_snapshot
@@ -267,7 +240,7 @@ describe "tinrelayd runtime policy" do
   it "rejects a delayed claim whose captured policy was replaced" do
     root = TinrelaySpec.temporary_root
     path = File.join(root, "tinrelayd.json")
-    TinrelayRuntimePolicySpec.write_site_only(path)
+    TinrelayRuntimePolicySpec.write_defaults(path)
     api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
     begin
       body = TinrelayRuntimePolicySpec::GatedBody.new(
@@ -319,7 +292,7 @@ describe "tinrelayd runtime policy" do
   it "counts a nonspecific stale-policy rejection as policy changed" do
     root = TinrelaySpec.temporary_root
     path = File.join(root, "tinrelayd.json")
-    TinrelayRuntimePolicySpec.write_site_only(path)
+    TinrelayRuntimePolicySpec.write_defaults(path)
     api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
     begin
       body = TinrelayRuntimePolicySpec::GatedBody.new(
@@ -408,7 +381,7 @@ describe "tinrelayd runtime policy" do
   it "publishes only canonical unique exclusions as immutable snapshots" do
     root = TinrelaySpec.temporary_root
     path = File.join(root, "tinrelayd.json")
-    TinrelayRuntimePolicySpec.write_site_only(path)
+    TinrelayRuntimePolicySpec.write_defaults(path)
     api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
     begin
       TinrelayRuntimePolicySpec.claim(api, "alpha")

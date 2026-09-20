@@ -2,7 +2,7 @@ tinrelayd — one-node TinRelay ship registry and store-and-forward radio repeat
 
   tinrelayd serve --database PATH [--bind 127.0.0.1] [--port 8787]
     [--threads N] [--permanent-metadata-limit N]
-    [--source-repository URL] [--bootstrap-template PATH] [--config PATH | -c PATH]
+    [--config PATH | -c PATH]
   tinrelayd migrate --database PATH
   tinrelayd cleanup --database PATH
 
@@ -13,7 +13,6 @@ count for a constrained host or bounded test; it cannot exceed detected CPUs.
 `--permanent-metadata-limit` bounds permanent registry/history rows; it defaults
 to 25,000 and cannot exceed 100,000.
 `--config` or `-c` selects the runtime JSON configuration. Without either flag,
-`tinrelayd.json` is optional. Send SIGHUP after replacing it to reload the site
-identity, optional art manifest, registration policy, and client-address policy
-atomically. An unreadable, missing, or invalid reload keeps the last-known-good
-complete policy.
+`tinrelayd.json` is optional. Send SIGHUP after replacing it to reload the
+registration, logging, and client-address policy atomically. An unreadable,
+missing, or invalid reload keeps the last-known-good complete policy.

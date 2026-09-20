@@ -147,20 +147,6 @@ module Tinrelay
     MAX_EXCLUDED_SHIPS = 256
     DEFAULT_PATH       = "tinrelayd.json"
 
-    class Site
-      include JSON::Serializable
-      include JSON::Serializable::Strict
-
-      getter site_name : String
-      getter base_url : String
-      getter wordmark : String
-      getter art_manifest_path : String?
-
-      def initialize(@site_name, @base_url, @wordmark,
-                     @art_manifest_path = nil)
-      end
-    end
-
     class Registration
       include JSON::Serializable
       include JSON::Serializable::Strict
@@ -205,12 +191,11 @@ module Tinrelay
     include JSON::Serializable
     include JSON::Serializable::Strict
 
-    getter site : Site
     getter registration : Registration = Registration.new
     getter client_address : ClientAddress = ClientAddress.new
     getter logging : Logging = Logging.new
 
-    def initialize(@site, @registration = Registration.new,
+    def initialize(@registration = Registration.new,
                    @client_address = ClientAddress.new,
                    @logging = Logging.new)
     end

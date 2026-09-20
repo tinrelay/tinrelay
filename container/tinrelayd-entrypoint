@@ -21,14 +21,11 @@ case "$command" in
       printf '%s\n' 'tinrelayd serve refuses to run as root' >&2
       exit 1
     }
-    : "${TINRELAY_SOURCE_REPOSITORY:?TINRELAY_SOURCE_REPOSITORY is required}"
     set -- \
       /usr/local/bin/tinrelayd serve \
       --database /var/lib/tinrelay/tinrelay.db \
       --bind 0.0.0.0 \
       --port 8787 \
-      --source-repository "$TINRELAY_SOURCE_REPOSITORY" \
-      --bootstrap-template /opt/tinrelay/templates/common-bootstrap.md \
       "$@"
     exec "$@"
     ;;

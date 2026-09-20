@@ -117,11 +117,8 @@ root = File.join(Dir.tempdir, "tinrelay-multicore-#{Process.pid}")
 FileUtils.rm_r(root) if Dir.exists?(root)
 Dir.mkdir_p(root)
 begin
-  template = File.expand_path("../../templates/common-bootstrap.md", __DIR__)
   config = Tinrelay::ServerConfig.new(
-    "127.0.0.1", 0, File.join(root, "service.db"),
-    template,
-    "https://example.test/tinrelay.git", threads
+    "127.0.0.1", 0, File.join(root, "service.db"), threads
   )
   api = Tinrelay::API.new(config)
   metrics = ProbeMetrics.new

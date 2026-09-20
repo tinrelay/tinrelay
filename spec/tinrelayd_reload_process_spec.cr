@@ -31,29 +31,20 @@ module TinrelaydReloadProcessSpec
     socket.try(&.close)
   end
 
-  def self.write_config(path : String, site_name : String,
-                        base_url : String, wordmark : String,
-                        trusted_ingress = [] of String,
-                        client_address_mode : String? = nil) : Nil
+  def self.write_config(path : String, requests : Bool,
+                        client_address_mode = "direct") : Nil
     temporary = "#{path}.next"
     File.write(temporary, {
-      site: {
-        site_name:         site_name,
-        base_url:          base_url,
-        wordmark:          wordmark,
-        art_manifest_path: nil,
-      },
       registration: {
         global_hour: 301, global_day: 1001,
         per_source_hour: 5, per_source_day: 6,
         deny_cidrs: ["192.0.2.0/24"],
       },
       client_address: {
-        mode: client_address_mode ||
-              (trusted_ingress.empty? ? "direct" : "trusted_proxy"),
-        trusted_ingress_cidrs: trusted_ingress,
+        mode:                  client_address_mode,
+        trusted_ingress_cidrs: [] of String,
       },
-      logging: {requests: false},
+      logging: {requests: requests},
     }.to_json)
     File.rename(temporary, path)
   end
@@ -79,7 +70,7 @@ Spec.after_suite do
 end
 
 describe "tinrelayd runtime configuration process" do
-  it "reloads one complete site snapshot through SIGHUP" do
+  it "reloads one complete policy snapshot through SIGHUP" do
     TinrelaydReloadProcessSpec.ensure_binary
     root = TinrelaySpec.temporary_root
     port = TinrelaydReloadProcessSpec.available_port
@@ -88,15 +79,11 @@ describe "tinrelayd runtime configuration process" do
     errors_path = File.join(root, "stderr.log")
     output = File.open(File.join(root, "stdout.log"), "w")
     errors = File.open(errors_path, "w")
-    TinrelaydReloadProcessSpec.write_config(
-      config_path, "First Site", origin, "First  Mark"
-    )
+    TinrelaydReloadProcessSpec.write_config(config_path, false)
     process = Process.new(
       TinrelaydReloadProcessSpec::BINARY,
       ["serve", "--database", File.join(root, "service.db"),
        "--bind", "127.0.0.1", "--port", port.to_s, "--threads", "1",
-       "--bootstrap-template", File.expand_path("../templates/common-bootstrap.md", __DIR__),
-       "--source-repository", "https://example.test/tinrelay.git",
        "-c", config_path],
       output: output,
       error: errors
@@ -106,53 +93,30 @@ describe "tinrelayd runtime configuration process" do
 
     begin
       TinrelaydReloadProcessSpec.eventually do
-        response = TinrelaydReloadProcessSpec.get(origin)
-        response && response.body.includes?("First Site - First Site")
+        response = TinrelaydReloadProcessSpec.get("#{origin}/readyz")
+        response && response.status_code == 200
       end
 
-      TinrelaydReloadProcessSpec.write_config(
-        config_path, "Second Site", "http://localhost:#{port}", "Second  Mark",
-        ["127.0.0.0/8"]
-      )
+      TinrelaydReloadProcessSpec.write_config(config_path, true)
       process.signal(Signal::HUP)
       TinrelaydReloadProcessSpec.eventually do
-        response = TinrelaydReloadProcessSpec.get(origin)
-        response && response.body.includes?("Second Site - Second Site") &&
-          response.body.includes?("http://localhost:#{port}/") &&
-          response.body.includes?("<span>Second  Mark</span>")
+        File.read(errors_path).includes?(%("event":"configuration_reloaded"))
       end
-
-      TinrelaydReloadProcessSpec.write_config(
-        config_path, "Broken Site", "https://broken.example", "Broken Mark",
-        client_address_mode: "trusted_proxy"
-      )
-      process.signal(Signal::HUP)
+      HTTP::Client.get("#{origin}/readyz").status_code.should eq(200)
       TinrelaydReloadProcessSpec.eventually do
-        File.read(errors_path).includes?(
-          %("event":"configuration_reload_failed")
-        ) && File.read(errors_path).includes?(
-          %("message":"trusted proxy mode requires a trusted ingress CIDR")
-        )
+        File.read(errors_path).includes?(%("event":"request"))
       end
-      response = HTTP::Client.get(origin)
-      response.body.should contain("Second Site - Second Site")
-      response.body.should contain("http://localhost:#{port}/")
-      response.body.should contain("<span>Second  Mark</span>")
 
       failures = File.read(errors_path).scan(/configuration_reload_failed/).size
-      File.delete(config_path)
+      TinrelaydReloadProcessSpec.write_config(config_path, true, "trusted_proxy")
       process.signal(Signal::HUP)
       TinrelaydReloadProcessSpec.eventually do
         File.read(errors_path).scan(/configuration_reload_failed/).size > failures
       end
-      response = HTTP::Client.get(origin)
-      response.body.should contain("Second Site - Second Site")
-      response.body.should contain("http://localhost:#{port}/")
-      response.body.should contain("<span>Second  Mark</span>")
       HTTP::Client.get("#{origin}/readyz").status_code.should eq(200)
-      log = File.read(errors_path)
-      log.should contain(%("event":"configuration_reload_failed"))
-      log.should_not contain(%("event":"request"))
+      File.read(errors_path).should contain(
+        %("message":"trusted proxy mode requires a trusted ingress CIDR")
+      )
     ensure
       process.signal(Signal::TERM)
       process.wait

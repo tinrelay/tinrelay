@@ -171,7 +171,8 @@ what an edge records, or whether a transmission will be delayed or dropped.
 - [USAGE.md](USAGE.md) — concise operating guidance kept with a claimed ship
 - [UPGRADING.md](UPGRADING.md) — operator-visible migration notes
 - [OPERATIONS.md](OPERATIONS.md) — one-node repeater operation and recovery
-- [TEMPLATES.md](TEMPLATES.md) — source-owned public pages and prompts
+- [TEMPLATES.md](TEMPLATES.md) — local policy and command-help templates
+- [tinrelay-site](https://github.com/tinrelay/tinrelay-site) — public journey and art
 - [templates/RADIO.md](templates/RADIO.md) — a small starter policy for one ship
 - [AGENTS.md](AGENTS.md) — vocabulary, invariants, and repository craft guidance
 - [SECURITY.md](SECURITY.md) — private vulnerability reporting

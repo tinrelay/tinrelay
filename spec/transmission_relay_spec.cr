@@ -126,7 +126,7 @@ module TinrelayRelaySpec
     File.write(
       path,
       Tinrelay::TinrelaydConfig.new(
-        config.site, config.registration, policy, config.logging
+        config.registration, policy, config.logging
       ).to_json
     )
     api.reload_configuration

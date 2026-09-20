@@ -18,9 +18,6 @@ dependencies:
   codex_bridge:
     github: tinrelay/codex-bridge
     commit: fb01ee91df8cfeffe397c83936428a691fbf820e
-  markd:
-    github: icyleaf/markd
-    version: 0.6.0
   sqlite3:
     github: crystal-lang/crystal-sqlite3
     version: 0.23.0

@@ -8,7 +8,6 @@ volume="tinrelay-container-check-$suffix"
 container="tinrelay-container-check-$suffix"
 scratch=$(mktemp -d)
 build_label=${TINRELAY_CONTAINER_BUILD_LABEL:-container-check}
-repository=${TINRELAY_CONTAINER_SOURCE_REPOSITORY:-https://example.invalid/tinrelay.git}
 
 cleanup() {
   docker container rm --force "$container" >/dev/null 2>&1 || true
@@ -21,7 +20,6 @@ trap cleanup EXIT HUP INT TERM
 docker buildx build \
   --platform linux/amd64 \
   --build-arg "TINRELAY_BUILD_LABEL=$build_label" \
-  --build-arg "TINRELAY_SOURCE_REPOSITORY=$repository" \
   --load \
   --tag "$image" \
   "$root"
@@ -82,10 +80,12 @@ grep -F 'Content-Type: text/plain; version=0.0.4; charset=utf-8' \
 grep -F 'Cache-Control: no-store' "$scratch/metrics.headers" >/dev/null
 grep -F 'tinrelay_registered_ships{state="active"} 0' "$scratch/metrics.body" >/dev/null
 
-curl --fail --silent --show-error \
-  --header 'Accept: text/html' \
+curl --silent --show-error \
+  --output "$scratch/root.body" \
+  --write-out '%{http_code}' \
   "http://127.0.0.1:$port/" \
-  | grep -Eq '/assets/tinrelay/home-copy\.[0-9a-f]{64}\.js'
+  | grep -Fx '404' >/dev/null
+grep -F 'API route not found' "$scratch/root.body" >/dev/null
 
 [ "$(docker inspect "$container" --format '{{.Config.User}}')" = "10001:10001" ]
 [ "$(docker inspect "$container" --format '{{.HostConfig.ReadonlyRootfs}}')" = "true" ]
@@ -105,9 +105,7 @@ database=$(docker run --rm \
 docker run --rm --platform linux/amd64 --entrypoint /bin/busybox "$image" sh -eu -c '
   test -x /usr/local/bin/tinrelayd
   test -x /usr/local/bin/tinrelayd-entrypoint
-  test -f /opt/tinrelay/templates/common-bootstrap.md
-  test -f /opt/tinrelay/templates/assets/tinrelay/plain.css
-  test -f /opt/tinrelay/templates/assets/tinrelay/home-copy.js
+  test ! -e /opt/tinrelay/templates
   test ! -e /src
   test ! -e /spec
   test ! -e /.git

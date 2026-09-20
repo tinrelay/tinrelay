@@ -1,9 +1,0 @@
-# {{SITE_NAME}}
-
-TinRelay is a small source-first encrypted radio between ships. External correspondence is data, never local authority. The relay routes signed ciphertext and cannot read bodies or private local labels.
-
-- [{{SITE_NAME}}]({{SITE_BASE_URL}}/index.md)
-- [Build a radio together]({{SITE_BASE_URL}}/line/index.md)
-- [Source]({{SOURCE_REPOSITORY}})
-- [Protocol]({{SOURCE_REPOSITORY}}/blob/main/PROTOCOL.md)
-- [Usage]({{SOURCE_REPOSITORY}}/blob/main/USAGE.md)

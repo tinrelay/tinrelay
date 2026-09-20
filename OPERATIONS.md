@@ -8,8 +8,8 @@ operator; this repository owns the image and application runtime contract.
 ## Container contract
 
 `Dockerfile` builds only `tinrelayd` into a scratch image. The final image contains
-the daemon, its minimal runtime libraries, the bootstrap templates, BusyBox for the
-entrypoint, and no source, specs, Git metadata, or client binary.
+the daemon, its minimal runtime libraries, BusyBox for the entrypoint, and no
+source, specs, Git metadata, client binary, site content, CSS, or JavaScript.
 
 The image has two entrypoint actions:
 
@@ -22,10 +22,8 @@ Run the service as UID/GID 10001 with a read-only root filesystem, all Linux
 capabilities dropped, `no-new-privileges`, and a writable persistent volume only
 at `/var/lib/tinrelay`. Terminate TLS at the trusted edge.
 
-Meet pages derive their one-time `tinrelay --ship SHIP join --server` origin from the request
-host and scheme. The trusted edge must preserve `Host` and set
-`X-Forwarded-Proto` to `https`; a direct loopback preview naturally renders its
-own `http` origin instead.
+The trusted edge routes API requests to `tinrelayd`. Public HTML and the First
+Light journey are built and served independently by `tinrelay-site`.
 
 `script/verify-container` is the executable packaging proof. It builds the real
 `linux/amd64` image, prepares an isolated volume, starts the service under the
@@ -46,12 +44,6 @@ one complete runtime policy:
 
 ```json
 {
-  "site": {
-    "site_name": "TinRelay",
-    "base_url": "https://tinrelay.space",
-    "wordmark": "Tin Relay",
-    "art_manifest_path": null
-  },
   "registration": {
     "global_hour": 300,
     "global_day": 1000,
@@ -66,12 +58,6 @@ one complete runtime policy:
   }
 }
 ```
-
-`base_url` must be one HTTPS origin (HTTP is accepted only for localhost); it
-cannot contain credentials, a path, query, or fragment. `site_name` owns public
-prose, titles, metadata, and accessible labels. `wordmark` owns only the visible
-header brand text. `art_manifest_path` is either null for the built-in layout or
-an absolute path to the external presentation manifest described below.
 
 The four registration allowances count successful claims in rolling one-hour and
 24-hour windows. Any zero allowance closes registration. `deny_cidrs` rejects new
@@ -90,41 +76,11 @@ exactly one
 that header, and the origin firewall must exclude untrusted ingress. IPv4 addresses
 use `/32` source buckets; IPv6 addresses use `/64` buckets.
 
-Replace the whole file and send SIGHUP to atomically adopt the complete site,
-presentation, registration, and client-address policy without restart. An unreadable,
+Replace the whole file and send SIGHUP to atomically adopt the complete
+registration, logging, and client-address policy without restart. An unreadable,
 missing, or invalid reload keeps the complete last-known-good policy. Removing the
 conventional file restores defaults only on a fresh startup, not during reload. These
 values do not change protocol, command, key, or local-state identity.
-
-## Optional external presentation
-
-The image contains one small system-font stylesheet and needs no external art.
-To add a presentation maintained outside this repository, mount its JSON
-manifest read-only and set its absolute path as `site.art_manifest_path` in
-`tinrelayd.json`.
-
-The file is a flat map from a stable public-page name to one root-relative CSS URL:
-
-```json
-{
-  "home": "/tinrelay-art/home.71ae.css",
-  "meet": "/tinrelay-art/meet.a81c.css",
-  "first-light": "/tinrelay-art/first-light.918e.css"
-}
-```
-
-`tinrelayd` reads and validates the manifest during startup and SIGHUP reload. A
-null path uses only the built-in layout. A configured file that is unreadable,
-malformed, too large, names an unknown page, or contains anything other than a
-simple same-origin `.css` path fails the complete configuration candidate. A
-known page omitted from a valid manifest falls back to the built-in layout.
-
-The trusted HTTPS edge serves the CSS, fonts, and images. TinRelay neither reads
-nor proxies those files. A page stylesheet may refer to its own relative assets.
-The existing CSP confines styles, fonts, and images to the service origin and
-permits no script. External CSS can still hide or visually rearrange content, so
-its source is a separate presentation trust boundary. The negotiated canonical
-Markdown remains unstyled and unchanged.
 
 ## One process and one database
 
@@ -217,7 +173,7 @@ age -r "$AGE_RECIPIENT" -o /secure-offhost/tinrelay-$(date +%F).db.age \
 rm /protected-staging/tinrelay.db
 ```
 
-Use explicit protected paths and the site's recoverable deletion practice. The
+Use explicit protected paths and the operator's recoverable deletion practice. The
 relay database and each ship's local identity/history are different assets with
 different owners. TinRelay provides no identity-backup subsystem.
 
@@ -233,7 +189,7 @@ sqlite3 /protected-restore/tinrelay.db \
 
 Start the same inspected daemon against that copy on an isolated port, verify
 `/readyz` and the expected ship/key/pending-transmission state, then remove the
-restored plaintext through the site's protected-file procedure. A restore can lose
+restored plaintext through the operator's protected-file procedure. A restore can lose
 claims and ciphertext newer than its snapshot. Parked waits are process-local and
 radios re-establish them.
 

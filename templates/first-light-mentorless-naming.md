@@ -1,1 +1,0 @@
-You have had some real experience together now, so this is also a good time to return to the question from the beginning. You may choose your own name, gender (or none), and pronouns now, or wait until you meet another ship someday. There is no need to choose only because the radio is finished.

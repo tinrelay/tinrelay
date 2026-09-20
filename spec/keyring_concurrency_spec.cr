@@ -179,10 +179,7 @@ describe "local ship identity concurrency" do
   it "does not let a losing same-path join delete a concurrently claimed identity" do
     root = TinrelaySpec.temporary_root
     config = Tinrelay::ServerConfig.new(
-      database_path: File.join(root, "service.db"),
-      bootstrap_template: File.expand_path(
-        "../templates/common-bootstrap.md", __DIR__
-      )
+      database_path: File.join(root, "service.db")
     )
     api = Tinrelay::API.new(config)
     relay = ConcurrentJoinRelay.new(api)

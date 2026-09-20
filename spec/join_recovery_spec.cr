@@ -47,10 +47,8 @@ module JoinRecoverySpec
                       first_body = %({"error":"unavailable"}),
                       first_headers = HTTP::Headers.new, &)
     root = TinrelaySpec.temporary_root
-    template = File.expand_path("../templates/common-bootstrap.md", __DIR__)
     config = Tinrelay::ServerConfig.new(
-      database_path: File.join(root, "service.db"),
-      bootstrap_template: template
+      database_path: File.join(root, "service.db")
     )
     api = Tinrelay::API.new(config)
     relay = JoinRecoveryRelay.new(

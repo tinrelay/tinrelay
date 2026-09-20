@@ -31,15 +31,13 @@ module TinrelaySpec
     {% end %}
   end
 
-  def self.with_server(art_manifest_path : String? = nil,
-                       permanent_metadata_limit : Int64 = DEFAULT_METADATA_LIMIT,
+  def self.with_server(permanent_metadata_limit : Int64 = DEFAULT_METADATA_LIMIT,
                        registration_allowances : Tinrelay::RegistrationAllowances? = nil,
                        client_address : Tinrelay::TinrelaydConfig::ClientAddress? = nil,
                        radio_wait_heartbeat_interval : Time::Span? = nil, &)
     root = temporary_root
-    template = File.expand_path("../templates/common-bootstrap.md", __DIR__)
     configuration_path = nil
-    if art_manifest_path || registration_allowances || client_address
+    if registration_allowances || client_address
       configuration_path = File.join(root, "tinrelayd.json")
       registration = registration_allowances.try do |allowances|
         Tinrelay::TinrelaydConfig::Registration.new(
@@ -50,18 +48,13 @@ module TinrelaySpec
       File.write(
         configuration_path,
         Tinrelay::TinrelaydConfig.new(
-          Tinrelay::TinrelaydConfig::Site.new(
-            "TinRelay", "https://tinrelay.space", "Tin Relay", art_manifest_path
-          ),
           registration,
           client_address || Tinrelay::TinrelaydConfig::ClientAddress.new
         ).to_json
       )
     end
     config = Tinrelay::ServerConfig.new(
-      "127.0.0.1", 0, File.join(root, "service.db"),
-      template,
-      "https://example.test/tinrelay.git", System.cpu_count,
+      "127.0.0.1", 0, File.join(root, "service.db"), System.cpu_count,
       permanent_metadata_limit, configuration_path
     )
     api = Tinrelay::API.new(

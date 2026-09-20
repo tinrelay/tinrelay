@@ -1,4 +1,3 @@
-require "uri"
 require "set"
 
 module Tinrelay
@@ -6,16 +5,12 @@ module Tinrelay
     getter bind : String
     getter port : Int32
     getter database_path : String
-    getter bootstrap_template : String
-    getter source_repository : String
     getter database_connections : Int32
     getter permanent_metadata_limit : Int64
     getter configuration_path : String?
 
     def initialize(@bind = "127.0.0.1", @port = 8787,
                    @database_path = "tinrelay.db",
-                   @bootstrap_template = "templates/common-bootstrap.md",
-                   @source_repository = "https://github.com/tinrelay/tinrelay",
                    @database_connections = System.cpu_count,
                    @permanent_metadata_limit = DEFAULT_PERMANENT_METADATA_LIMIT,
                    @configuration_path = nil)
@@ -23,14 +18,13 @@ module Tinrelay
   end
 
   class RuntimeSnapshot
-    getter page : BootstrapPage
     getter registration_allowances : RegistrationAllowances
     getter client_address_policy : ClientAddressPolicy
     getter? request_logging : Bool
     @registration_deny_cidrs : Array(IPNetwork)
     @rate_limit_exclusions : Set(String)
 
-    def initialize(@page, @registration_allowances,
+    def initialize(@registration_allowances,
                    registration_deny_cidrs : Array(IPNetwork),
                    @client_address_policy,
                    rate_limit_exclusions : Array(String),
@@ -98,10 +92,6 @@ module Tinrelay
 
     def runtime_snapshot : RuntimeSnapshot
       @runtime_snapshot.get(:acquire)
-    end
-
-    def bootstrap_page : BootstrapPage
-      runtime_snapshot.page
     end
 
     def reload_configuration : Nil
@@ -248,8 +238,7 @@ module Tinrelay
         store.ship_change(parse_body(context, ShipChange))
         json(context, 200, %({"state":"updated"}))
       else
-        return error(context, 404, "not_found", "API route not found") if path.starts_with?("/v1/")
-        public_route(context)
+        error(context, 404, "not_found", "API route not found")
       end
     end
 
@@ -496,135 +485,6 @@ module Tinrelay
       output.to_s
     end
 
-    private def public_route(context : HTTP::Server::Context) : Int32
-      request = context.request
-      page = bootstrap_page
-      return public_not_found(context, page) unless request.method.in?({"GET", "HEAD"})
-      path = request.path
-      return homepage(context, page, path == "/index.md") if path.in?({"/", "/index.md"})
-      if path == "/llms.txt"
-        return public_text(context, page.agent_map, "text/plain; charset=utf-8")
-      end
-      if path == "/robots.txt"
-        return public_text(
-          context,
-          page.static("robots.txt"),
-          "text/plain; charset=utf-8"
-        )
-      end
-      if path == "/sitemap.xml"
-        return public_text(
-          context,
-          page.sitemap,
-          "application/xml; charset=utf-8"
-        )
-      end
-      if name = public_asset_name(path)
-        return public_asset(context, page, name)
-      end
-
-      if line = line_route(path)
-        return bootstrap(
-          context, page, line[:coordinate], line[:journey], line[:action],
-          explicit_markdown: line[:explicit_markdown]
-        )
-      end
-      public_not_found(context, page)
-    end
-
-    private def homepage(context : HTTP::Server::Context,
-                         page : BootstrapPage,
-                         explicit_markdown : Bool) : Int32
-      markdown = page.homepage
-      alternate = "/index.md"
-      wants_markdown = explicit_markdown || markdown_requested?(context.request)
-      body = wants_markdown ? markdown : page.html(
-        markdown, false, alternate, "home", handoffs.waiting_count
-      )
-      context.response.headers["Cache-Control"] = "no-store"
-      context.response.headers["Vary"] = "Accept"
-      context.response.headers["Referrer-Policy"] = "no-referrer"
-      context.response.headers["Content-Security-Policy"] = content_security_policy(true)
-      context.response.headers["Link"] = alternate_link(page, alternate)
-      write_body(
-        context, 200,
-        wants_markdown ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8",
-        body
-      )
-    end
-
-    private def bootstrap(context : HTTP::Server::Context, page : BootstrapPage,
-                          coordinate : String?, journey : String?, action : String?,
-                          explicit_markdown : Bool) : Int32
-      markdown = if action == BootstrapPage::FLIGHT_PLAN_PAGE
-                   page.flight_plan(coordinate)
-                 else
-                   page.markdown(
-                     coordinate, action, journey,
-                     repeater_origin: request_origin(context.request)
-                   )
-                 end
-      directed = !coordinate.nil?
-      private_page = directed || !action.nil?
-      alternate = line_markdown_path(coordinate, journey, action)
-      wants_markdown = explicit_markdown || markdown_requested?(context.request)
-      page_key = action || "meet"
-      body = wants_markdown ? markdown : page.html(
-        markdown, private_page, alternate, page_key, handoffs.waiting_count,
-        coordinate: coordinate
-      )
-      content_type = wants_markdown ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8"
-      context.response.headers["Cache-Control"] = "no-store"
-      context.response.headers["Vary"] = "Accept"
-      context.response.headers["Referrer-Policy"] = "no-referrer"
-      context.response.headers["Content-Security-Policy"] = content_security_policy
-      context.response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive" if private_page
-      context.response.headers["Link"] = alternate_link(page, alternate)
-      write_body(context, 200, content_type, body)
-    end
-
-    private def public_not_found(context : HTTP::Server::Context,
-                                 page : BootstrapPage) : Int32
-      markdown = page.not_found
-      wants_markdown = markdown_requested?(context.request)
-      body = wants_markdown ? markdown : page.html(
-        markdown, true, "/line/index.md", "not-found", handoffs.waiting_count
-      )
-      context.response.headers["Cache-Control"] = "no-store"
-      context.response.headers["Vary"] = "Accept"
-      context.response.headers["Referrer-Policy"] = "no-referrer"
-      context.response.headers["Content-Security-Policy"] = content_security_policy
-      context.response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
-      write_body(
-        context, 404,
-        wants_markdown ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8",
-        body
-      )
-    end
-
-    private def public_text(context : HTTP::Server::Context, body : String,
-                            content_type : String) : Int32
-      context.response.headers["Cache-Control"] = "public, max-age=300"
-      write_body(context, 200, content_type, body)
-    end
-
-    private def public_asset(context : HTTP::Server::Context,
-                             page : BootstrapPage, name : String) : Int32
-      asset = page.asset(name)
-      context.response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-      context.response.headers["X-Content-Type-Options"] = "nosniff"
-      write_body(
-        context, 200, asset[:content_type], asset[:body]
-      )
-    end
-
-    private def public_asset_name(path : String) : String?
-      prefix = "/assets/tinrelay/"
-      return nil unless path.starts_with?(prefix)
-      name = path[prefix.bytesize..]
-      name.empty? ? nil : name
-    end
-
     private def write_body(context : HTTP::Server::Context, status : Int32,
                            content_type : String, body : String) : Int32
       context.response.status_code = status
@@ -652,107 +512,14 @@ module Tinrelay
     end
 
     private def safe_log_path(path : String) : String
-      directed_line_path?(path) ? "/:coordinate" : path
-    end
-
-    private def line_route(path : String) : NamedTuple(
-      coordinate: String?,
-      journey: String?,
-      action: String?,
-      explicit_markdown: Bool,
-    )?
-      return nil unless path.starts_with?('/') && path.size > 1 && !path.ends_with?('/')
-      segments = path[1..].split('/')
-      explicit_markdown = segments.last? == "index.md"
-      segments.pop if explicit_markdown
-      return nil if segments.empty? || segments.any?(&.empty?)
-
-      first = decode_path!(segments.shift)
-      coordinate = if first == "line"
-                     nil
-                   else
-                     Names.coordinate!(first)
-                     first
-                   end
-
-      if segments.empty?
-        return {
-          coordinate:        coordinate,
-          journey:           nil,
-          action:            nil,
-          explicit_markdown: explicit_markdown,
-        }
-      end
-      if segments.size == 1 && segments[0] == BootstrapPage::FLIGHT_PLAN_PAGE
-        return {
-          coordinate:        coordinate,
-          journey:           nil,
-          action:            segments[0],
-          explicit_markdown: explicit_markdown,
-        }
-      end
-
-      return nil unless segments.size.in?(1..2)
-      journey = segments[0]
-      return nil unless BootstrapPage::JOURNEYS.includes?(journey)
-      action = segments[1]? || journey
-      return nil unless BootstrapPage.action_allowed?(journey, action)
-      {
-        coordinate:        coordinate,
-        journey:           journey,
-        action:            action,
-        explicit_markdown: explicit_markdown,
-      }
-    rescue Invalid
-      nil
-    end
-
-    private def line_markdown_path(
-      coordinate : String?,
-      journey : String?,
-      action : String?,
-    ) : String
-      path = coordinate ? "/#{URI.encode_path_segment(coordinate)}" : "/line"
-      if action == BootstrapPage::FLIGHT_PLAN_PAGE
-        return "#{path}/#{BootstrapPage::FLIGHT_PLAN_PAGE}/index.md"
-      end
-      return "#{path}/index.md" unless journey
-      path = "#{path}/#{journey}"
-      path = "#{path}/#{action}" if action && action != journey
-      "#{path}/index.md"
-    end
-
-    private def content_security_policy(allow_script : Bool = false) : String
-      "default-src 'none'; " +
-        "style-src 'self'; " +
-        "img-src 'self'; " +
-        "font-src 'self'; " +
-        (allow_script ? "script-src 'self'; " : "") +
-        "base-uri 'none'; " +
-        "form-action 'none'"
-    end
-
-    private def alternate_link(page : BootstrapPage, alternate : String) : String
-      %(<#{page.public_url(alternate)}>; rel="alternate"; type="text/markdown", ) +
-        %(<#{page.public_url("/llms.txt")}>; rel="describedby")
+      path
     end
 
     private def load_runtime_snapshot(allow_missing_default : Bool) : RuntimeSnapshot
       candidate = TinrelaydConfig.load(
         config.configuration_path, allow_missing_default
       )
-      site = candidate.try(&.site)
-      art_manifest = ArtManifest.load(
-        site.try(&.art_manifest_path), BootstrapPage::PAGE_KEYS
-      )
-      page = BootstrapPage.new(
-        config.bootstrap_template, config.source_repository, art_manifest,
-        site_name: site.try(&.site_name) || BootstrapPage::DEFAULT_SITE_NAME,
-        site_base_url: site.try(&.base_url) || BootstrapPage::DEFAULT_SITE_BASE_URL,
-        wordmark: site.try(&.wordmark) || BootstrapPage::DEFAULT_WORDMARK
-      )
       RuntimeSnapshot.new(
-        page,
         candidate.try(&.registration_allowances) || RegistrationAllowances.new,
         candidate.try(&.registration_deny_cidrs) || [] of IPNetwork,
         candidate.try(&.client_address_policy) ||
@@ -760,49 +527,6 @@ module Tinrelay
         candidate.try(&.rate_limit_exclusions) || [] of String,
         candidate.try(&.logging.requests) != false
       )
-    end
-
-    private def directed_line_path?(path : String) : Bool
-      line_route(path).try { |line| !line[:coordinate].nil? } || false
-    end
-
-    private def markdown_requested?(request : HTTP::Request) : Bool
-      request.headers["Accept"]?.try do |header|
-        header.split(',').any? do |entry|
-          media, *parameters = entry.split(';').map(&.strip)
-          quality_parameter = parameters.find(&.starts_with?("q="))
-          quality = quality_parameter ? quality_parameter[2..].to_f? || 0.0 : 1.0
-          media == "text/markdown" && quality > 0.0
-        end
-      end || false
-    end
-
-    private def request_origin(request : HTTP::Request) : String
-      scheme = request.headers["X-Forwarded-Proto"]?
-        .try(&.split(',').first.strip) || "http"
-      raise Invalid.new("public request scheme is invalid") unless scheme.in?({"http", "https"})
-      authority = request.headers["Host"]? ||
-                  raise Invalid.new("public request host is missing")
-      unless authority.each_char.all? do |character|
-               character.ascii_alphanumeric? || character.in?({'.', '-', ':', '[', ']'})
-             end
-        raise Invalid.new("public request origin is invalid")
-      end
-      uri = URI.parse("#{scheme}://#{authority}")
-      unless uri.scheme == scheme && uri.host && uri.user.nil? &&
-             uri.password.nil? && uri.path.empty? && uri.query.nil? &&
-             uri.fragment.nil?
-        raise Invalid.new("public request origin is invalid")
-      end
-      "#{scheme}://#{uri.authority}"
-    rescue URI::Error
-      raise Invalid.new("public request origin is invalid")
-    end
-
-    private def decode_path!(value : String) : String
-      URI.decode(value)
-    rescue URI::Error
-      raise Invalid.new("URL path encoding is invalid")
     end
   end
 end
