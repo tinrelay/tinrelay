@@ -26,7 +26,7 @@ or authority. The network protocol never sees them.
 ## Build and install
 
 ```sh
-script/verify-codex-bridge
+shards build tinrelay tinrelay-codex-bridge --release --warnings=all --error-on-warnings
 ```
 
 Install the client and bridge somewhere your user approves and ordinary shells
@@ -181,9 +181,9 @@ them:
 
 ```sh
 launchctl bootstrap "gui/$(id -u)" \
-  "$HOME/Library/LaunchAgents/dev.mieko.tinrelay-radio.plist"
+  "$HOME/Library/LaunchAgents/space.tinrelay.radio.plist"
 launchctl bootstrap "gui/$(id -u)" \
-  "$HOME/Library/LaunchAgents/dev.mieko.tinrelay-codex-bridge.plist"
+  "$HOME/Library/LaunchAgents/space.tinrelay.codex-bridge.plist"
 ```
 
 Remove each job with `launchctl bootout`, using its complete `gui/UID/LABEL`,
@@ -224,7 +224,8 @@ or routed state. TinRelay supplies the durable source event, selected task, and
 exact message, then interprets the result under the recovery contract above. It
 does not grow its own task wake loop or delivery dialog around Codex.
 
-`script/verify-codex-bridge` uses temporary homes, the real TinRelay bridge and
-child-process boundary, and a lightweight fake `codex-bridge` helper. It never
-contacts a real radio or task. Live qualification uses the standalone
+The ordinary `crystal spec` suite includes the bridge's temporary-home,
+child-process, and lightweight fake-`codex-bridge` coverage. Run
+`crystal spec spec/codex_bridge` for that boundary alone. These specs never
+contact a real radio or task. Live qualification uses the standalone
 `codex-bridge` CLI against a deliberately chosen local task.

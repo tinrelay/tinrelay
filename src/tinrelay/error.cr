@@ -5,12 +5,6 @@ module Tinrelay
   class Invalid < Error
   end
 
-  class MigrationRequired < Error
-    def initialize
-      super("legacy encrypted local keys require: tinrelay --ship SHIP migrate")
-    end
-  end
-
   class Unauthorized < Error
   end
 

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>space.tinrelay.codex-bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/USER/.local/bin/tinrelay-codex-bridge</string>
+    <string>run</string>
+    <string>--ship</string>
+    <string>SHIP</string>
+    <string>--routing-file</string>
+    <string>/Users/USER/.config/tinrelay/SHIP/codex-addresses.json</string>
+    <string>--tinrelay</string>
+    <string>/Users/USER/.local/bin/tinrelay</string>
+    <string>--codex-home</string>
+    <string>/Users/USER/.codex</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/USER/Library/Logs/tinrelay-codex-bridge.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/USER/Library/Logs/tinrelay-codex-bridge.error.log</string>
+</dict>
+</plist>

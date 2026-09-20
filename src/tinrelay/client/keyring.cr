@@ -209,7 +209,6 @@ module Tinrelay
 
     protected def self.load_encoded(path : String, owner_path : String?,
                                     encoded : String) : Keyring
-      raise MigrationRequired.new if legacy_file?(encoded)
       data = KeyringData.from_json(encoded)
       raise Invalid.new("unsupported ship keyring format") unless data.format == 2
       new(
@@ -261,7 +260,6 @@ module Tinrelay
 
     protected def owner_unlocked : OwnerKeyData
       encoded = self.class.read_private(owner_path, "owner key")
-      raise MigrationRequired.new if self.class.legacy_file?(encoded)
       owner = self.class.load_plain_owner(encoded)
       self.class.validate_owner!(data, owner)
       owner
@@ -428,24 +426,12 @@ module Tinrelay
       data.radios.size != before
     end
 
-    protected def self.legacy_file?(encoded : String) : Bool
-      JSON.parse(encoded).as_h.has_key?("kdf")
-    rescue JSON::ParseException | TypeCastError
-      false
-    end
-
     protected def self.read_private(path : String, label : String) : String
       raise NotFound.new("#{label} not found: #{path}") unless File.file?(path)
       unless PrivateStorage.private?(path)
         raise Invalid.new("#{label} must be private to the current user")
       end
       File.read(path)
-    end
-
-    protected def self.load_plain_keyring(encoded : String) : KeyringData
-      data = KeyringData.from_json(encoded)
-      raise Invalid.new("unsupported ship keyring format") unless data.format == 2
-      data
     end
 
     protected def self.load_plain_owner(encoded : String) : OwnerKeyData

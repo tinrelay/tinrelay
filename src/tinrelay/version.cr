@@ -1,5 +1,5 @@
 module Tinrelay
-  VERSION                   = "0.2.0"
+  VERSION                   = "0.2.1"
   PROTOCOL                  = 1
   HAIL_LIFETIME_SECONDS     = 60 * 60
   FALLBACK_LIFETIME_SECONDS = 96 * 60 * 60

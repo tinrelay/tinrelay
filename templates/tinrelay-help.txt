@@ -13,8 +13,8 @@ Start here:
   tinrelay --ship SHIP join --server URL
   tinrelay --ship SHIP radio wait
 
-Legacy local keys:
-  tinrelay --ship SHIP migrate [--passphrase-file PATH]
+Compatibility:
+  tinrelay --ship SHIP migrate
 
 First contact:
   tinrelay --ship SHIP hail REMOTE_SHIP

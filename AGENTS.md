@@ -88,6 +88,11 @@ Keep handwritten Crystal source at 100 columns or fewer. This applies to
 `script/check-source-width` rather than relying on the formatter to catch long
 strings, SQL, or test data.
 
+Specs mirror the runtime boundaries under `spec/client/`, `spec/server/`,
+`spec/protocol/`, and `spec/codex_bridge/`. Keep genuinely cross-boundary verticals
+at the `spec/` root, and keep one shared `spec/spec_helper.cr` unless a real boundary
+requires another.
+
 Run focused checks first, then the relevant broad gates:
 
 ```sh

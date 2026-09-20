@@ -1,9 +1,5 @@
-require "io/console"
-
 require "./tinrelay/client/runtime"
 require "./tinrelay/client/body_input"
-require "./tinrelay/client/legacy_key_migration"
-require "./tinrelay/client/private_input"
 
 module Tinrelay
   module CLI
@@ -24,15 +20,8 @@ module Tinrelay
 
       case command
       when "migrate"
-        passphrase_file = extract_unique(argv, "--passphrase-file")
         no_extra!(argv)
-        migration_required = Keyring.migration_required?(paths.keyring, paths.owner_key)
-        phrase = legacy_passphrase(paths, passphrase_file) if migration_required
-        migrated = Keyring.migrate(paths.keyring, phrase, paths.owner_key)
-        removed = remove_legacy_passphrase(paths, passphrase_file)
-        puts({state: migrated ? "migrated" : "current", ship: ship,
-              keyring: paths.keyring, owner_key: paths.owner_key,
-              passphrase_removed: removed}.to_json)
+        puts({state: "current", ship: ship}.to_json)
       when "join"
         server = required(argv, "--server")
         no_extra!(argv)
@@ -305,37 +294,6 @@ module Tinrelay
         STDERR.puts(common.to_json)
       end
       STDERR.flush
-    end
-
-    private def self.legacy_passphrase(paths : LocalPaths, path : String?) : String
-      return PrivateInput.read(path, "passphrase") if path
-      default_path = paths.legacy_passphrase
-      return PrivateInput.read(default_path, "passphrase") if File.file?(default_path)
-      unless STDIN.tty?
-        raise Invalid.new(
-          "passphrase file not found at #{default_path}; create that owner-only file or use " +
-          "migrate --passphrase-file PATH (no interactive terminal is available)"
-        )
-      end
-      STDERR.print "TinRelay passphrase: "
-      value = STDIN.noecho &.gets
-      STDERR.puts
-      (value || raise Invalid.new("passphrase input ended unexpectedly")).chomp
-    end
-
-    private def self.remove_legacy_passphrase(paths : LocalPaths,
-                                              supplied_path : String?) : Bool
-      return false if supplied_path
-      path = paths.legacy_passphrase
-      return false unless File.file?(path)
-      begin
-        File.delete(path)
-      rescue ex : File::Error
-        raise Invalid.new(
-          "local keys are current, but the obsolete passphrase could not be removed: #{path}"
-        )
-      end
-      true
     end
 
     private def self.extract(argv : Array(String), name : String) : String?

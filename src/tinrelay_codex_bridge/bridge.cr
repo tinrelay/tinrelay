@@ -5,7 +5,7 @@ require "../tinrelay/platform/private_storage"
 require "./child_lifetime"
 
 module TinrelayCodexBridge
-  VERSION = "0.2.0"
+  VERSION = "0.2.1"
 
   class Blocked < Exception; end
 

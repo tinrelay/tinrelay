@@ -12,44 +12,10 @@ this release reported version `0.1.0`, so use the retained source checkout revis
 to determine which actions below apply. This guide does not promise a direct upgrade
 from an older commit.
 
-### Remove the obsolete local passphrase wrapper
-
-External passphrase files are no longer supported by ordinary TinRelay commands.
-You must update each existing ship before using it with the new client:
-
-```sh
-tinrelay --ship "$SHIP" migrate
-```
-
-The new client stores `keyring` and `owner-key` directly as owner-only files. It
-does not accept or read a passphrase during `join`, sending, collection, rotation,
-or any other ordinary operation. The only remaining passphrase path is the one-time
-decoder in `migrate`.
-
-Before starting any new client process, stop every old process that can read or
-write this ship's keyring. Install the new `tinrelay` binary, then migrate that
-ship with the command above.
-
-The command reads the old canonical
-`$HOME/.config/tinrelay/$SHIP/passphrase`, decrypts and validates both legacy key
-files, and atomically replaces each one without changing the ship, owner, radio
-keys, contacts, or server. An interrupted conversion is safe to repeat. Only after
-both new files are valid does it remove that adjacent passphrase file. A wrong
-passphrase or invalid file leaves all three old files in place.
-
-If the old passphrase lives elsewhere, supply it only to this command:
-
-```sh
-tinrelay --ship "$SHIP" migrate --passphrase-file /absolute/protected/path
-```
-
-TinRelay does not remove a caller-supplied file. The migration is idempotent: a
-successful first run reports `migrated`; a repeated run reports `current`. An
-ordinary command given legacy encrypted keys stops with `migration_required`
-instead of accepting a passphrase or silently converting them.
-
-This is only a local-storage correction. It does not change protocol 1, the
-registered ship identity, the repeater, or any peer.
+The one-time local-key conversion required during the 0.2.0 cutover is complete
+for every deployed ship. `tinrelay --ship "$SHIP" migrate` remains available as
+an idempotent compatibility command and reports `current` without changing local
+state.
 
 ### Direct Codex routing
 
@@ -144,9 +110,9 @@ plists into `$HOME/Library/LaunchAgents/`, then load them:
 
 ```sh
 launchctl bootstrap "gui/$(id -u)" \
-  "$HOME/Library/LaunchAgents/dev.mieko.tinrelay-radio.plist"
+  "$HOME/Library/LaunchAgents/space.tinrelay.radio.plist"
 launchctl bootstrap "gui/$(id -u)" \
-  "$HOME/Library/LaunchAgents/dev.mieko.tinrelay-codex-bridge.plist"
+  "$HOME/Library/LaunchAgents/space.tinrelay.codex-bridge.plist"
 ```
 
 On Linux, copy the edited 0.2.0 units into `$HOME/.config/systemd/user/`, then load
