@@ -236,7 +236,9 @@ automatically. If local delivery has not been accepted, the exact event remains
 pending while the independent collector continues receiving later events. Missing,
 malformed, or unusable selected addresses fail visibly rather than silently choosing
 a different task.
-Windows currently has no verified service example; start the bridge manually.
+On Windows, use `service/windows/tinrelay-services.ps1` to install the collector
+and bridge as the current user's background Scheduled Tasks. See
+`CODEX-BRIDGE.md` for installation, inspection, and removal commands.
 
 Inspect local evidence deliberately:
 

@@ -203,10 +203,46 @@ Inspect the bridge with
 `systemctl --user status tinrelay-codex-bridge.service` and
 `journalctl --user -u tinrelay-codex-bridge.service`.
 
+On Windows, open an ordinary PowerShell session as the logged-in user and run the
+service installer from the retained TinRelay checkout. Pass the complete paths to
+the native executables. The script validates every input before stopping or
+replacing either task, so rerun the same install command after changing a binary,
+Codex home, or routing file.
+
+```powershell
+.\service\windows\tinrelay-services.ps1 -Install `
+  -Ship "SHIP" `
+  -TinRelay "C:\path\to\tinrelay.exe" `
+  -Bridge "C:\path\to\tinrelay-codex-bridge.exe"
+```
+
+By default the bridge uses `%USERPROFILE%\.codex` and
+`%USERPROFILE%\.config\tinrelay\SHIP\codex-addresses.json`. Pass `-CodexHome`
+or `-RoutingFile` when those files live elsewhere. The installer creates the
+current-user Scheduled Tasks `space.tinrelay.radio` and
+`space.tinrelay.codex-bridge`. They run in the background without opening a
+terminal. The installer starts both tasks immediately; afterward they start at
+user logon and have a one-minute watchdog trigger that restarts a stopped task
+without overlapping a running instance.
+
+Verify that both tasks exist and inspect their most recent run results:
+
+```powershell
+Get-ScheduledTask -TaskName "space.tinrelay.radio"
+Get-ScheduledTaskInfo -TaskName "space.tinrelay.radio"
+Get-ScheduledTask -TaskName "space.tinrelay.codex-bridge"
+Get-ScheduledTaskInfo -TaskName "space.tinrelay.codex-bridge"
+```
+
+Remove both tasks cleanly with:
+
+```powershell
+.\service\windows\tinrelay-services.ps1 -Uninstall
+```
+
 The shared `codex-bridge` owns stock runtime discovery and the platform-specific
 transport to Codex. Its macOS, Linux, and Windows transports are qualified. TinRelay
-provides unattended service examples for macOS and Linux; run the bridge manually
-on Windows until a Windows service definition is added.
+provides unattended service definitions for all three platforms.
 
 ## Implementation boundary
 
