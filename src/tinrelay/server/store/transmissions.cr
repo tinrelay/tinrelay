@@ -123,6 +123,35 @@ module Tinrelay
       end
     end
 
+    def verify_withdrawal(request : TransmissionWithdrawal,
+                          now : Int64 = Time.utc.to_unix) : Nil
+      require_uuid!(request.transmission_id, "transmission id")
+      database.db.transaction do |transaction|
+        verify_radio_action(
+          transaction.connection, request.auth,
+          "transmission.withdraw", request.payload, now
+        )
+      end
+    end
+
+    def withdraw(request : TransmissionWithdrawal,
+                 now : Int64 = Time.utc.to_unix) : Bool
+      require_uuid!(request.transmission_id, "transmission id")
+      write_transaction do |transaction|
+        connection = transaction.connection
+        verify_radio_action(
+          connection, request.auth, "transmission.withdraw", request.payload, now
+        )
+        connection.exec(
+          <<-SQL, request.transmission_id, request.auth.ship
+            UPDATE transmissions
+               SET state = 'withdrawn', ciphertext = NULL, signature = NULL
+             WHERE id = ? AND sender_ship = ? AND state = 'pending'
+          SQL
+        ).rows_affected == 1
+      end.not_nil!
+    end
+
     private def validate_envelope_shape!(envelope : SignedRelayEnvelope) : Nil
       unless envelope.object_version == 1 && envelope.protocol == PROTOCOL
         raise Invalid.new("unsupported signed relay envelope")

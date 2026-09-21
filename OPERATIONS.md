@@ -68,8 +68,8 @@ window; it does not bypass registration policy, authentication, request or pendi
 bounds, or permanent-metadata capacity. An unclaimed excluded name remains dormant
 until that exact ship is claimed.
 
-In `direct` client-address mode, registration and transmission admission use the
-socket peer and ignore forwarded-address headers. In `trusted_proxy` mode,
+In `direct` client-address mode, registration, transmission admission, and withdrawal use
+the socket peer and ignore forwarded-address headers. In `trusted_proxy` mode,
 `trusted_ingress_cidrs` must name the final trusted proxy ingress. TinRelay accepts
 exactly one
 `X-Tinrelay-Client-IP` value only from such a peer. The final proxy must overwrite
@@ -125,7 +125,9 @@ occurs on the first sweep after 24 hours rather than at the exact anniversary.
 the deployment's SSH tunnel or another operator-only path. It reports registered
 ships and relationships by state, active parked radio waits, queued transmission and hail depth and
 age, retained ciphertext bytes, and fixed-outcome counters for registrations,
-transmissions, hails, waits, configuration reloads, and cleanup. It contains no
+transmissions, authenticated withdrawal requests and changed pending rows, hails,
+waits, configuration reloads, and cleanup. Withdrawal metrics are operator-only
+aggregate evidence; they are not a sender-visible effect query or receipt. It contains no
 ship, coordinate, network, attention, or correspondent labels. Database-backed
 gauges survive restart; process counters and the process start timestamp reset
 with `tinrelayd`. Rising queue depth and oldest-item age while accepted traffic
@@ -153,7 +155,10 @@ and verified-backup age.
 Pending fallback ciphertext expires after 96 hours. Successful local spool
 acknowledgement erases relay payload immediately; direct acknowledged handoff never
 writes a transmission payload row. A stopped radio loses only its in-memory parked
-wait. Valid destinations still receive bounded SQLite store-and-forward.
+wait. An authenticated blind withdrawal erases a matching pending payload while retaining
+content-free replay metadata until the same signed expiry. Cleanup removes withdrawn and
+collected tombstones after that boundary. Valid destinations still receive bounded SQLite
+store-and-forward.
 
 Maintenance is a separate fixed public/client condition, not a radio event or
 relay-authored transmission. An edge that does not provide that bounded response

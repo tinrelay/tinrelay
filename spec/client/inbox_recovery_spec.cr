@@ -89,14 +89,14 @@ describe "inbox recovery transitions" do
     )
     spool = Tinrelay::Spool.new(File.join(root, "inbox"))
     record = spool.store_rejection(envelope, "invalid_envelope")
-    pending = File.join(spool.pending, "#{record.local_id}.json")
-    routed = File.join(spool.routed, "#{record.local_id}.json")
+    pending = TinrelayInboxSpec.record_path(spool.pending, record.source_id)
+    routed = File.join(spool.routed, record.kind, "#{record.source_id}.json")
     begin
       File.copy(pending, routed)
       File.delete(pending)
 
-      reconciled = spool.routed(record.local_id)
-      reconciled.local_id.should eq(record.local_id)
+      reconciled = spool.routed(record.kind, record.source_id)
+      reconciled.source_id.should eq(record.source_id)
       reconciled.routed.should be_true
     ensure
       FileUtils.rm_r(root) if Dir.exists?(root)
@@ -122,15 +122,15 @@ describe "inbox recovery transitions" do
 
       accepted = receiver.radio_wait(spool, hold_seconds: 0)
       accepted.kind.should eq("transmission")
-      spool.routed(accepted.local_id)
+      spool.routed(accepted.kind, accepted.source_id)
       conflict = receiver.radio_wait(spool, hold_seconds: 0)
       conflict.kind.should eq("rejected_transmission")
       conflict.wrapper.should contain("transmission_id_conflict")
       conflict.wrapper.should_not contain("different signed words")
       conflict.wrapper.should_not contain("Authenticated sender")
-      rejection = spool.get(conflict.local_id)
+      rejection = spool.get(conflict.kind, conflict.source_id)
         .as(Tinrelay::RejectedTransmissionSpoolRecord)
-      JSON.parse(spool.inspection(rejection.local_id)).as_h
+      JSON.parse(spool.inspection(rejection.kind, rejection.source_id)).as_h
         .has_key?("sender_ship").should be_false
       spool.list.count(&.kind.==("transmission")).should eq(1)
       api.database.db.scalar(
@@ -161,9 +161,9 @@ describe "inbox recovery transitions" do
       event.kind.should eq("rejected_transmission")
       event.wrapper.should_not contain("beta")
       event.wrapper.downcase.should_not contain("authenticated sender")
-      spool.get(event.local_id)
+      spool.get(event.kind, event.source_id)
         .should be_a(Tinrelay::RejectedTransmissionSpoolRecord)
-      JSON.parse(spool.inspection(event.local_id)).as_h
+      JSON.parse(spool.inspection(event.kind, event.source_id)).as_h
         .has_key?("sender_ship").should be_false
     end
   end
@@ -186,18 +186,18 @@ describe "inbox recovery transitions" do
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
       old_event = receiver.radio_wait(spool, hold_seconds: 0)
-      pending_path = TinrelayInboxSpec.record_path(spool.root, old_event.local_id)
+      pending_path = TinrelayInboxSpec.record_path(spool.root, old_event.source_id)
       original_bytes = File.read(pending_path)
-      spool.routed(old_event.local_id)
-      routed_path = TinrelayInboxSpec.record_path(spool.root, old_event.local_id)
+      spool.routed(old_event.kind, old_event.source_id)
+      routed_path = TinrelayInboxSpec.record_path(spool.root, old_event.source_id)
       File.read(routed_path).should eq(original_bytes)
       File.write(routed_path, "corrupt routed evidence")
 
       new_event = receiver.radio_wait(spool, hold_seconds: 0)
       new_event.kind.should eq("transmission")
-      spool.get(new_event.local_id).as(Tinrelay::TransmissionSpoolRecord)
+      spool.get(new_event.kind, new_event.source_id).as(Tinrelay::TransmissionSpoolRecord)
         .signed_transmission.body.should eq("new pending work")
-      inspection = spool.inspection(new_event.local_id)
+      inspection = spool.inspection(new_event.kind, new_event.source_id)
       inspection.scan("new pending work").size.should eq(1)
       JSON.parse(inspection).as_h.has_key?("external_body").should be_false
     end
@@ -220,8 +220,8 @@ describe "inbox recovery transitions" do
         "exact encrypted envelope retained; retry with: tinrelay --ship beta outbox retry " +
         "#{failure.transmission_id}: relay is unavailable"
       )
-      Tinrelay::Outbox.new("#{beta.keyring.path}.outbox")
-        .list.map(&.transmission_id).should eq([failure.transmission_id])
+      Tinrelay::OutgoingStore.new("#{beta.keyring.path}.outgoing", "beta")
+        .list_outbox.map(&.transmission_id).should eq([failure.transmission_id])
       api.database.db.scalar(
         "SELECT COUNT(*) FROM transmissions WHERE sender_ship = 'beta'"
       ).as(Int64).should eq(0)

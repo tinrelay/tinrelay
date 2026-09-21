@@ -78,8 +78,8 @@ module Tinrelay
       identity.generation
     end
 
-    def allow_contact(local_hail_id : String, spool : Spool) : ShipContact
-      record = spool.get(local_hail_id).as?(HailSpoolRecord) ||
+    def allow_contact(hail_id : String, spool : Spool) : ShipContact
+      record = spool.get("hail", hail_id).as?(HailSpoolRecord) ||
                raise Invalid.new("local inbox item is not a hail")
       peer = Names.ship!(record.sender_ship)
       mutate_keyring do
@@ -262,7 +262,7 @@ module Tinrelay
         StoredKeyPair.new(
           Crypto.b64(encryption.public_key), Crypto.b64(encryption.secret_key)
         ),
-        certificate
+        certificate, owner_public_key: owner.key.public_key
       )
       keyring.data.pending_radio = identity
       identity

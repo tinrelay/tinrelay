@@ -85,19 +85,21 @@ module TinrelayCodexBridge
     end
 
     def routed?(event : Event)
-      routed, kind = status(event.id)
+      routed, kind = status(event.kind, event.id)
       raise Blocked.new("status_kind_mismatch") unless kind == event.kind
       routed
     end
 
     def dereference(event : Event) : String
       return event.wrapper unless event.kind == "transmission"
-      result, output, _ = execute(["inbox", "show", event.id, "--ship", @config.ship])
+      result, output, _ = execute([
+        "inbox", "show", event.kind, event.id, "--ship", @config.ship,
+      ])
       raise Blocked.new("tinrelay_inbox_show_failed") unless result.success?
       value = JSON.parse(output)
-      unless value["contract"].as_s == "tinrelay-inspected-inbox-v1" &&
+      unless value["contract"].as_s == "tinrelay-inspected-inbox-v2" &&
              value["kind"].as_s == "transmission" &&
-             value["local_id"].as_s == event.id &&
+             value["transmission_id"].as_s == event.id &&
              value["state"].as_s == "pending"
         raise Blocked.new("invalid_inbox_output")
       end
@@ -118,9 +120,9 @@ module TinrelayCodexBridge
       end
 
       delivery = {
-        contract:        "tinrelay-message-delivery-v1",
+        contract:        "tinrelay-message-delivery-v2",
         kind:            "transmission",
-        local_id:        event.id,
+        transmission_id: event.id,
         local_ship:      @config.ship,
         received_at:     received_at,
         sender_ship:     sender_ship,
@@ -133,31 +135,35 @@ module TinrelayCodexBridge
       raise Blocked.new("invalid_inbox_output")
     end
 
-    def routed?(local_id : String)
-      status(local_id).first
+    def routed?(kind : String, source_id : String)
+      status(kind, source_id).first
     end
 
     def mark_routed(event : Event)
       result, output, _ = execute([
-        "radio", "routed", event.id, "--ship", @config.ship,
+        "radio", "routed", event.kind, event.id, "--ship", @config.ship,
       ])
       raise Blocked.new("tinrelay_routed_failed") unless result.success?
       value = JSON.parse(output).as_h
-      unless value.keys.sort == ["id", "state"] &&
-             value["state"].as_s == "routed" && value["id"].as_s == event.id
+      unless value.keys.sort == ["kind", "source_id", "state"] &&
+             value["state"].as_s == "routed" &&
+             value["kind"].as_s == event.kind &&
+             value["source_id"].as_s == event.id
         raise Blocked.new("invalid_routed_output")
       end
     rescue JSON::ParseException | TypeCastError | KeyError
       raise Blocked.new("invalid_routed_output")
     end
 
-    private def status(local_id : String)
-      result, output, _ = execute(["radio", "status", local_id, "--ship", @config.ship])
+    private def status(kind : String, source_id : String)
+      result, output, _ = execute([
+        "radio", "status", kind, source_id, "--ship", @config.ship,
+      ])
       raise Blocked.new("tinrelay_status_failed") unless result.success?
       value = JSON.parse(output)
-      raise Blocked.new("status_id_mismatch") unless value.as_h["local_id"].as_s == local_id
-      kind = value.as_h["kind"].as_s
-      unless {"transmission", "hail", "rejected_transmission"}.includes?(kind)
+      unless value.as_h["source_id"].as_s == source_id &&
+             value.as_h["kind"].as_s == kind &&
+             {"transmission", "hail", "rejected_transmission"}.includes?(kind)
         raise Blocked.new("invalid_radio_status")
       end
       routed = case value.as_h["state"].as_s

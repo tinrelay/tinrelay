@@ -21,6 +21,7 @@ module Tinrelay
       case command
       when "migrate"
         no_extra!(argv)
+        LocalStateMigration.new(paths, home, ship).run
         puts({state: "current", ship: ship}.to_json)
       when "join"
         server = required(argv, "--server")
@@ -46,13 +47,22 @@ module Tinrelay
         no_extra!(argv)
         sender = client(paths)
         body = BodyInput.read
+        outgoing = OutgoingStore.new(paths.outgoing, ship)
         envelope = sender.send(
-          recipient, body, from_label, outbox: Outbox.new(paths.outbox),
+          recipient, body, from_label, outgoing: outgoing,
           observer: OutgoingObserver.from_config(paths.outgoing_observer)
         )
         puts envelope.submission_evidence.to_json
       when "outbox"
-        outbox(argv, paths)
+        outbox(argv, ship, paths)
+      when "sent"
+        sent(argv, ship, paths)
+      when "withdraw"
+        transmission_id = argv.shift? || raise Invalid.new("withdraw requires a transmission id")
+        no_extra!(argv)
+        outgoing = OutgoingStore.new(paths.outgoing, ship)
+        client(paths).withdraw(outgoing, transmission_id)
+        puts({state: "withdrawal_requested", transmission_id: transmission_id}.to_json)
       when "radio"
         radio(argv, ship, paths)
       when "inbox"
@@ -110,12 +120,12 @@ module Tinrelay
       operation = argv.shift? || raise Invalid.new("contact requires allow, close, or unblock")
       case operation
       when "allow"
-        local_hail_id = argv.shift? || raise Invalid.new("contact allow requires a local hail ID")
+        hail_id = argv.shift? || raise Invalid.new("contact allow requires a hail ID")
         no_extra!(argv)
         allowed = client(paths)
-          .allow_contact(local_hail_id, Spool.new(paths.spool))
+          .allow_contact(hail_id, Spool.new(paths.spool))
         puts({state: "relationship_active", ship: ship, peer_ship: allowed.ship,
-              local_hail_id: local_hail_id}.to_json)
+              hail_id: hail_id}.to_json)
       when "close"
         peer = argv.shift? || raise Invalid.new("contact close requires a peer ship")
         no_extra!(argv)
@@ -150,7 +160,7 @@ module Tinrelay
           begin
             event = collector.radio_collect(spool)
             retry_delay = 1
-            puts({state: "collected", local_id: event.local_id, kind: event.kind}.to_json)
+            puts({state: "collected", source_id: event.source_id, kind: event.kind}.to_json)
             STDOUT.flush
           rescue ex : TransportUnavailable | RadioWaitReconnect
             case ex
@@ -183,16 +193,18 @@ module Tinrelay
         end
         puts(event ? event.to_json : %({"state":"quiet"}))
       when "routed"
-        id = argv.shift? || raise Invalid.new("radio routed requires a local transmission id")
+        kind = argv.shift? || raise Invalid.new("radio routed requires an evidence kind")
+        source_id = argv.shift? || raise Invalid.new("radio routed requires a source id")
         spool = Spool.new(paths.spool)
         no_extra!(argv)
-        record = spool.routed(id)
-        puts({state: "routed", id: record.local_id}.to_json)
+        record = spool.routed(kind, source_id)
+        puts({state: "routed", kind: record.kind, source_id: record.source_id}.to_json)
       when "status"
-        id = argv.shift? || raise Invalid.new("radio status requires a local transmission id")
+        kind = argv.shift? || raise Invalid.new("radio status requires an evidence kind")
+        source_id = argv.shift? || raise Invalid.new("radio status requires a source id")
         spool = Spool.open_existing(paths.spool)
         no_extra!(argv)
-        puts spool.status(id).to_json
+        puts spool.status(kind, source_id).to_json
       else
         raise Invalid.new("radio requires collect, wait, poll, status, or routed")
       end
@@ -221,27 +233,39 @@ module Tinrelay
                    else
                      {sender_ship: nil, attention_label: nil}
                    end
-          puts({id: record.local_id, kind: record.kind,
+          puts({source_id: record.source_id, kind: record.kind,
                 received_at: record.received_at,
                 state: record.routed ? "routed" : "pending"}.merge(source).to_json)
         end
       when "show"
-        id = argv.shift? || raise Invalid.new("inbox show requires a local transmission id")
+        kind = argv.shift? || raise Invalid.new("inbox show requires an evidence kind")
+        source_id = argv.shift? || raise Invalid.new("inbox show requires a source id")
         no_extra!(argv)
         spool = Spool.new(paths.spool)
-        puts spool.inspection(id)
+        puts spool.inspection(kind, source_id)
       else
         raise Invalid.new("inbox requires list or show")
       end
     end
 
-    private def self.outbox(argv, paths) : Nil
+    private def self.outbox(argv, ship, paths) : Nil
       operation = argv.shift? || raise Invalid.new("outbox requires list or retry")
-      box = Outbox.new(paths.outbox)
+      outgoing = OutgoingStore.new(paths.outgoing, ship)
+      legacy = Outbox.new(paths.outbox)
       case operation
       when "list"
         no_extra!(argv)
-        box.list.each do |envelope|
+        outgoing.list_outbox.each do |record|
+          transmission = record.signed_transmission
+          envelope = record.signed_relay_envelope
+          puts({transmission_id: record.transmission_id,
+                sender_ship: transmission.sender_ship,
+                recipient_ship: transmission.recipient_ship,
+                created_at: transmission.created_at, expires_at: envelope.expires_at,
+                retryable: outgoing.retryable?(record),
+                state: "acceptance_unknown"}.to_json)
+        end
+        legacy.list.each do |envelope|
           puts({transmission_id: envelope.transmission_id, sender_ship: envelope.sender_ship,
                 recipient_ship: envelope.recipient_ship,
                 created_at: envelope.created_at,
@@ -251,11 +275,65 @@ module Tinrelay
       when "retry"
         id = argv.shift? || raise Invalid.new("outbox retry requires a transmission id")
         no_extra!(argv)
-        envelope = client(paths).retry(box, id)
-        puts envelope.submission_evidence.to_json
+        sender = client(paths)
+        if outgoing.outbox?(id)
+          envelope = sender.retry(
+            outgoing, id,
+            observer: OutgoingObserver.from_config(paths.outgoing_observer)
+          )
+          puts envelope.submission_evidence.to_json
+        else
+          envelope = sender.retry(legacy, id)
+          puts envelope.submission_evidence.to_json
+        end
       else
         raise Invalid.new("outbox requires list or retry")
       end
+    end
+
+    private def self.sent(argv, ship, paths) : Nil
+      operation = argv.shift? || raise Invalid.new("sent requires list or show")
+      outgoing = OutgoingStore.new(paths.outgoing, ship)
+      case operation
+      when "list"
+        no_extra!(argv)
+        outgoing.list_sent.each do |record|
+          begin
+            puts sent_presentation(
+              record, outgoing.withdrawal_requested?(record.transmission_id), body: false
+            ).to_json
+          rescue Error | IO::Error
+            # Preserve malformed evidence without blocking unrelated sent correspondence.
+          end
+        end
+      when "show"
+        transmission_id = argv.shift? || raise Invalid.new("sent show requires a transmission id")
+        no_extra!(argv)
+        record = outgoing.sent(transmission_id)
+        puts sent_presentation(
+          record, outgoing.withdrawal_requested?(transmission_id), body: true
+        ).to_pretty_json
+      else
+        raise Invalid.new("sent requires list or show")
+      end
+    end
+
+    private def self.sent_presentation(record : OutgoingRecord,
+                                       withdrawal_requested : Bool,
+                                       body : Bool)
+      transmission = record.signed_transmission
+      common = {
+        state:                "accepted",
+        transmission_id:      record.transmission_id,
+        destination:          "#{transmission.to_label}@#{transmission.recipient_ship}",
+        author_label:         transmission.from_label,
+        sender_ship:          transmission.sender_ship,
+        recipient_ship:       transmission.recipient_ship,
+        created_at:           transmission.created_at,
+        withdrawal_requested: withdrawal_requested,
+      }
+      return common unless body
+      common.merge({body: transmission.body})
     end
 
     private def self.client(paths) : Client

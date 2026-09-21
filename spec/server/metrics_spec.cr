@@ -37,6 +37,12 @@ describe "repeater metrics" do
       response.body.should contain("tinrelay_registrations_total{outcome=\"policy_changed\"} 0")
       response.body.should contain("tinrelay_transmissions_total{outcome=\"queued\"} 1")
       response.body.should contain("tinrelay_transmissions_total{outcome=\"rejected\"} 1")
+      response.body.should contain(
+        "tinrelay_transmission_withdrawals_total{outcome=\"requested\"} 0"
+      )
+      response.body.should contain(
+        "tinrelay_transmission_withdrawals_total{outcome=\"changed\"} 0"
+      )
       response.body.should contain("tinrelay_hails_total{outcome=\"accepted\"} 1")
       response.body.should contain("tinrelay_radio_waits_total{outcome=\"disconnect\"} 0")
       response.body.should contain("tinrelay_retained_ciphertext_bytes ")

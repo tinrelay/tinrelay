@@ -97,7 +97,7 @@ describe "local ship identity concurrency" do
       hail_spool = Tinrelay::Spool.new(File.join(root, "allow-inbox"))
       fresh = KeyringConcurrencySpec.reload(alpha)
       hail = fresh.radio_wait(hail_spool, hold_seconds: 0)
-      fresh.allow_contact(hail.local_id, hail_spool)
+      fresh.allow_contact(hail.source_id, hail_spool)
 
       KeyringConcurrencySpec.close_one_of_beta_contacts(
         root, origin, beta

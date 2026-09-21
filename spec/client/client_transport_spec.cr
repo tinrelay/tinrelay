@@ -288,18 +288,18 @@ describe Tinrelay::Remote do
       TinrelayClientTransportSpec.with_response(503, maintenance) do |origin|
         keyring = Tinrelay::Keyring.create(
           File.join(root, "keyring"), origin, "alpha")
-        outbox = Tinrelay::Outbox.new(File.join(root, "outbox"))
+        outbox = Tinrelay::OutgoingStore.new(File.join(root, "outgoing"), "alpha")
         client = Tinrelay::Client.new(
           keyring, Tinrelay::Remote.new(origin)
         )
 
         failure = expect_raises(Tinrelay::AcceptanceUnknown) do
-          client.send("steward@alpha", "held through maintenance", outbox: outbox)
+          client.send("steward@alpha", "held through maintenance", outgoing: outbox)
         end
         failure.message.to_s.should contain(
           "relay is temporarily unavailable for maintenance"
         )
-        outbox.list.map(&.transmission_id).should eq([failure.transmission_id])
+        outbox.list_outbox.map(&.transmission_id).should eq([failure.transmission_id])
       end
     ensure
       FileUtils.rm_r(root) if Dir.exists?(root)

@@ -65,31 +65,35 @@ describe "the socially blind repeater boundary" do
                   {% else %}
                     {% raise "unsupported platform" %}
                   {% end %}
-      outbox = Tinrelay::Outbox.new(directory)
-      unreliable_remote = AcceptThenDropRemote.new(origin, api.store, outbox.directory)
+      outgoing = Tinrelay::OutgoingStore.new(directory, "beta")
+      unreliable_remote = AcceptThenDropRemote.new(
+        origin, api.store, outgoing.outbox_directory
+      )
       unreliable = Tinrelay::Client.new(beta.keyring, unreliable_remote)
 
       failure = expect_raises(Tinrelay::AcceptanceUnknown, /acceptance is unknown/) do
-        unreliable.send("steward@alpha", "response may have been lost", outbox: outbox)
+        unreliable.send("steward@alpha", "response may have been lost", outgoing: outgoing)
       end
-      pending = outbox.list
+      pending = outgoing.list_outbox
       pending.size.should eq(1)
       pending[0].transmission_id.should eq(failure.transmission_id)
       unreliable_remote.saw_preserved_envelope.should be_true
       TinrelaySpec.assert_private_storage(directory, 0o700)
-      path = File.join(directory, "#{failure.transmission_id}.json")
+      path = outgoing.outbox_path(failure.transmission_id)
       TinrelaySpec.assert_private_storage(path, 0o600)
       api.database.db.scalar(
         "SELECT COUNT(*) FROM transmissions WHERE id = ?", failure.transmission_id
       ).as(Int64).should eq(1)
 
-      retried = beta.retry(outbox, failure.transmission_id)
+      retried = beta.retry(outgoing, failure.transmission_id)
       retried.submission_evidence[:state].should eq("accepted")
-      outbox.list.should be_empty
+      outgoing.list_outbox.should be_empty
+      outgoing.sent(failure.transmission_id).signed_relay_envelope.to_json
+        .should eq(retried.to_json)
 
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
       event = alpha.radio_wait(spool, hold_seconds: 0)
-      event.local_id.should_not be_empty
+      event.source_id.should eq(failure.transmission_id)
 
       # Collection and relay payload erasure do not change sender evidence.
       response = beta.remote.post("/v1/transmissions", retried.to_json)

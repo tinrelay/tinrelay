@@ -41,7 +41,7 @@ when args[0, 2]? == ["radio", "wait"]
     exit
   end
   config["events"]?.try(&.as_a).try &.each do |event|
-    id = event["local_id"].as_s
+    id = event["source_id"].as_s
     unless File.exists?(File.join(root, "#{id}.routed"))
       puts event.to_json
       exit
@@ -49,13 +49,16 @@ when args[0, 2]? == ["radio", "wait"]
   end
   loop { sleep 100.milliseconds }
 when args[0, 2]? == ["radio", "status"]
-  id = args[2]
-  event = config["events"].as_a.find { |candidate| candidate["local_id"].as_s == id }.not_nil!
+  kind = args[2]
+  id = args[3]
+  event = config["events"].as_a.find do |candidate|
+    candidate["kind"].as_s == kind && candidate["source_id"].as_s == id
+  end.not_nil!
   routed = File.exists?(File.join(root, "#{id}.routed"))
   result = {
-    "state"    => JSON::Any.new(routed ? "routed" : "pending"),
-    "local_id" => JSON::Any.new(id),
-    "kind"     => JSON::Any.new(event["kind"].as_s),
+    "state"     => JSON::Any.new(routed ? "routed" : "pending"),
+    "source_id" => JSON::Any.new(id),
+    "kind"      => JSON::Any.new(event["kind"].as_s),
   }
   config["status_override"]?.try(&.as_h).try &.each do |key, value|
     result[key] = value
@@ -65,16 +68,17 @@ when args[0, 2]? == ["radio", "status"]
     File.touch(File.join(root, "#{id}.routed"))
   end
 when args[0, 2]? == ["inbox", "show"]
-  id = args[2]
+  id = args[3]
   records = config["inbox_records"]?.try(&.as_h)
   record = records.try(&.[id]?)
   exit 3 unless record
   puts record.to_json
 when args[0, 2]? == ["radio", "routed"]
   exit 3 if config["routed_failure"]?.try(&.as_bool?)
-  id = args[2]
+  kind = args[2]
+  id = args[3]
   File.touch(File.join(root, "#{id}.routed"))
-  puts({state: "routed", id: id}.to_json)
+  puts({state: "routed", kind: kind, source_id: id}.to_json)
 else
   exit 3
 end

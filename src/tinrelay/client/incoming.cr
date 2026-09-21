@@ -111,7 +111,7 @@ module Tinrelay
     private def acknowledge_local_record(record : SpoolRecord) : Nil
       case record
       when TransmissionSpoolRecord, RejectedTransmissionSpoolRecord
-        acknowledge(record.relay_transmission_id)
+        acknowledge(record.transmission_id)
       when HailSpoolRecord
         acknowledge_hail(record.hail_id)
       end

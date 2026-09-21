@@ -123,7 +123,7 @@ describe "immediate radio polling" do
       replayed = Tinrelay::Client.new(alpha.keyring, offline)
         .radio_poll(spool)
 
-      replayed.not_nil!.local_id.should eq(pending.local_id)
+      replayed.not_nil!.source_id.should eq(pending.source_id)
       offline.holds.should be_empty
       offline.acknowledgements.should be_empty
     end
@@ -132,14 +132,16 @@ describe "immediate radio polling" do
   it "lets radio wait resurface durable local work without the relay" do
     root = TinrelaySpec.temporary_root
     spool = Tinrelay::Spool.new(File.join(root, "inbox"))
+    transmission_id = "11111111-1111-4111-8111-111111111111"
+    evidence_id = Tinrelay::RejectionEvidence.id(transmission_id, "unusable_envelope")
     record = Tinrelay::RejectedTransmissionSpoolRecord.new(
-      local_id: "tr_0123456789abcdef0123456789abcdef",
+      evidence_id: evidence_id,
       received_at: 10_i64,
-      relay_transmission_id: "11111111-1111-4111-8111-111111111111",
+      transmission_id: transmission_id,
       rejection_reason: "unusable_envelope"
     )
     Tinrelay::AtomicPrivateFile.write(
-      File.join(spool.pending, "#{record.local_id}.json"),
+      File.join(spool.pending, record.kind, "#{record.source_id}.json"),
       record.to_pretty_json + "\n"
     )
     offline = RadioPollRemote.new(
@@ -151,7 +153,7 @@ describe "immediate radio polling" do
     event = Tinrelay::Client.new(keyring, offline)
       .radio_wait(spool, hold_seconds: 0)
 
-    event.local_id.should eq(record.local_id)
+    event.source_id.should eq(record.source_id)
     offline.holds.should be_empty
     offline.acknowledgements.should be_empty
   ensure
@@ -171,7 +173,7 @@ describe "immediate radio polling" do
       event = alpha.radio_poll(spool).not_nil!
 
       event.kind.should eq("transmission")
-      spool.get(event.local_id).as(Tinrelay::TransmissionSpoolRecord)
+      spool.get(event.kind, event.source_id).as(Tinrelay::TransmissionSpoolRecord)
         .signed_transmission.body.should eq("waiting at the repeater")
       api.database.db.query_one(
         "SELECT state, ciphertext IS NULL FROM transmissions WHERE id = ?",
@@ -194,8 +196,8 @@ describe "immediate radio polling" do
 
       second = alpha.radio_collect(spool, hold_seconds: 0)
 
-      second.local_id.should_not eq(first.local_id)
-      spool.next_unrouted.not_nil!.local_id.should eq(first.local_id)
+      second.source_id.should_not eq(first.source_id)
+      spool.next_unrouted.not_nil!.source_id.should eq(first.source_id)
       spool.list.count { |record| !record.routed }.should eq(2)
     end
   end

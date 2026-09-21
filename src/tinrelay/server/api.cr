@@ -185,6 +185,8 @@ module Tinrelay
         json(context, 200, store.inspect_ship(parse_body(context, ShipInspection)))
       when {"POST", "/v1/transmissions"}
         accept_transmission(context)
+      when {"POST", "/v1/transmissions/withdraw"}
+        withdraw_transmission(context)
       when {"POST", "/v1/hails"}
         accept_hail(context)
       when {"POST", "/v1/radio/wait"}
@@ -354,6 +356,34 @@ module Tinrelay
     rescue ex
       metrics.transmission("rejected") unless counted
       raise ex
+    end
+
+    private def withdraw_transmission(context : HTTP::Server::Context) : Int32
+      acceptance_at = Time.instant + ACCEPTANCE_TARGET
+      content_length = context.request.headers["Content-Length"]?.try(&.to_i64?)
+      if content_length && content_length > MAX_REQUEST_BYTES
+        raise Invalid.new("request body exceeds #{MAX_REQUEST_BYTES} bytes")
+      end
+      body = read_limited(context.request.body)
+      withdrawal = TransmissionWithdrawal.from_json(body)
+      store.verify_withdrawal(withdrawal)
+      metrics.withdrawal("requested")
+
+      snapshot = runtime_snapshot
+      unless snapshot.rate_limit_excluded?(withdrawal.auth.ship)
+        source = snapshot.source_bucket(
+          context.request.remote_address, context.request.headers
+        )
+        if retry_after = transmission_buckets.admit(source, body.bytesize)
+          raise TransmissionLimited.new(retry_after.to_i64)
+        end
+      end
+
+      changed = store.withdraw(withdrawal)
+      metrics.withdrawal("changed") if changed
+      remaining = acceptance_at - Time.instant
+      sleep remaining if remaining > Time::Span.zero
+      json(context, 202, %({"state":"accepted"}))
     end
 
     private def accept_hail(context : HTTP::Server::Context) : Int32

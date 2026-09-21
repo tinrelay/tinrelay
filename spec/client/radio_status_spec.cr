@@ -5,17 +5,22 @@ describe "local radio status" do
     root = TinrelaySpec.temporary_root
     spool_root = File.join(root, "inbox")
     spool = Tinrelay::Spool.new(spool_root)
+    transmission_id = "11111111-1111-4111-8111-111111111111"
+    evidence_id = Tinrelay::RejectionEvidence.id(transmission_id, "unusable_envelope")
     record = Tinrelay::RejectedTransmissionSpoolRecord.new(
-      local_id: "tr_0123456789abcdef0123456789abcdef",
+      evidence_id: evidence_id,
       received_at: 10_i64,
-      relay_transmission_id: "11111111-1111-4111-8111-111111111111",
+      transmission_id: transmission_id,
       rejection_reason: "unusable_envelope"
     )
     Tinrelay::AtomicPrivateFile.write(
-      File.join(spool.pending, "#{record.local_id}.json"),
+      File.join(spool.pending, record.kind, "#{record.source_id}.json"),
       record.to_pretty_json + "\n"
     )
-    File.write(File.join(spool.routed, "tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"), "corrupt")
+    File.write(
+      File.join(spool.routed, record.kind, "tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"),
+      "corrupt"
+    )
     {% if flag?(:win32) %}
       TinrelaySpec::WindowsAcl.permissive(spool_root)
     {% elsif flag?(:darwin) || flag?(:linux) %}
@@ -25,8 +30,8 @@ describe "local radio status" do
     {% end %}
 
     reader = Tinrelay::Spool.open_existing(spool_root)
-    reader.status(record.local_id).should eq({
-      state: "pending", local_id: record.local_id,
+    reader.status(record.kind, record.source_id).should eq({
+      state: "pending", source_id: record.source_id,
       kind: "rejected_transmission",
     })
     {% if flag?(:win32) %}
@@ -37,15 +42,17 @@ describe "local radio status" do
       {% raise "TinRelay specs do not support this platform" %}
     {% end %}
 
-    original = File.read(File.join(spool.pending, "#{record.local_id}.json"))
-    spool.routed(record.local_id)
-    reader.status(record.local_id).should eq({
-      state: "routed", local_id: record.local_id,
+    original = File.read(File.join(spool.pending, record.kind, "#{record.source_id}.json"))
+    spool.routed(record.kind, record.source_id)
+    reader.status(record.kind, record.source_id).should eq({
+      state: "routed", source_id: record.source_id,
       kind: "rejected_transmission",
     })
-    File.exists?(File.join(spool.pending, "#{record.local_id}.json")).should be_false
-    File.read(File.join(spool.routed, "#{record.local_id}.json")).should eq(original)
-    spool.routed(record.local_id).routed.should be_true
+    File.exists?(File.join(spool.pending, record.kind, "#{record.source_id}.json"))
+      .should be_false
+    File.read(File.join(spool.routed, record.kind, "#{record.source_id}.json"))
+      .should eq(original)
+    spool.routed(record.kind, record.source_id).routed.should be_true
   ensure
     FileUtils.rm_r(root) if root && Dir.exists?(root)
   end
@@ -56,15 +63,15 @@ describe "local radio status" do
     reader = Tinrelay::Spool.open_existing(missing)
 
     expect_raises(Tinrelay::NotFound, "inbox record not found") do
-      reader.status("tr_0123456789abcdef0123456789abcdef")
+      reader.status("rejected_transmission", "tr_0123456789abcdef0123456789abcdef")
     end
     Dir.exists?(missing).should be_false
 
     spool = Tinrelay::Spool.new(File.join(root, "inbox"))
     corrupt_id = "tr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    File.write(File.join(spool.pending, "#{corrupt_id}.json"), "not json")
+    File.write(File.join(spool.pending, "rejected_transmission", "#{corrupt_id}.json"), "not json")
     expect_raises(Tinrelay::Error, "inbox record is corrupt: #{corrupt_id}.json") do
-      Tinrelay::Spool.open_existing(spool.root).status(corrupt_id)
+      Tinrelay::Spool.open_existing(spool.root).status("rejected_transmission", corrupt_id)
     end
   ensure
     FileUtils.rm_r(root) if root && Dir.exists?(root)
@@ -76,20 +83,20 @@ describe "local radio status" do
     requested_id = "tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     embedded_id = "tr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     record = Tinrelay::RejectedTransmissionSpoolRecord.new(
-      local_id: embedded_id,
+      evidence_id: embedded_id,
       received_at: 10_i64,
-      relay_transmission_id: "11111111-1111-4111-8111-111111111111",
+      transmission_id: "11111111-1111-4111-8111-111111111111",
       rejection_reason: "unusable_envelope"
     )
-    record_path = File.join(spool.pending, "#{requested_id}.json")
-    routed_path = File.join(spool.routed, "#{embedded_id}.json")
+    record_path = File.join(spool.pending, record.kind, "#{requested_id}.json")
+    routed_path = File.join(spool.routed, record.kind, "#{embedded_id}.json")
     Tinrelay::AtomicPrivateFile.write(record_path, record.to_pretty_json + "\n")
     Tinrelay::AtomicPrivateFile.write(routed_path, record.to_pretty_json + "\n")
     record_bytes = File.read(record_path)
     routed_bytes = File.read(routed_path)
 
-    expect_raises(Tinrelay::Error, "inbox record id does not match requested id") do
-      Tinrelay::Spool.open_existing(spool.root).status(requested_id)
+    expect_raises(Tinrelay::Error, "inbox record identity does not match its path") do
+      Tinrelay::Spool.open_existing(spool.root).status(record.kind, requested_id)
     end
     File.read(record_path).should eq(record_bytes)
     File.read(routed_path).should eq(routed_bytes)
@@ -103,8 +110,8 @@ describe "local radio status" do
     canary = File.join(spool.root, "escape.json")
     File.write(canary, "must remain unread and unchanged")
 
-    expect_raises(Tinrelay::Invalid, "invalid local inbox id") do
-      spool.routed("../escape")
+    expect_raises(Tinrelay::Invalid, "invalid inbox source id") do
+      spool.routed("transmission", "../escape")
     end
     File.read(canary).should eq("must remain unread and unchanged")
   ensure

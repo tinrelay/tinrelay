@@ -1,8 +1,6 @@
 require "../spec_helper"
 
 module TinrelaySpoolRecordSpec
-  LOCAL_ID = "tr_0123456789abcdef0123456789abcdef"
-
   def self.certificate : Tinrelay::ShipRadioCertificate
     Tinrelay::ShipRadioCertificate.new(
       "alpha", 2, "signing-public", "encryption-public", 10_i64, 1,
@@ -21,8 +19,7 @@ module TinrelaySpoolRecordSpec
   def self.records : Array(Tinrelay::SpoolRecord)
     [
       Tinrelay::TransmissionSpoolRecord.new(
-        local_id: LOCAL_ID, received_at: 30_i64,
-        relay_transmission_id: transmission.transmission_id,
+        received_at: 30_i64,
         sender_ship: "alpha", recipient_ship: "beta",
         to_label: "steward", from_label: "caller",
         signed_transmission: transmission,
@@ -30,12 +27,15 @@ module TinrelaySpoolRecordSpec
         sender_owner_chain: [Tinrelay::OwnerKeyLink.new(1, "owner-public")]
       ),
       Tinrelay::RejectedTransmissionSpoolRecord.new(
-        local_id: LOCAL_ID, received_at: 30_i64,
-        relay_transmission_id: transmission.transmission_id,
+        evidence_id: Tinrelay::RejectionEvidence.id(
+          transmission.transmission_id, "unusable_envelope"
+        ),
+        received_at: 30_i64,
+        transmission_id: transmission.transmission_id,
         rejection_reason: "unusable_envelope"
       ),
       Tinrelay::HailSpoolRecord.new(
-        local_id: LOCAL_ID, received_at: 30_i64,
+        received_at: 30_i64,
         hail: Tinrelay::Hail.new(
           "33333333-3333-4333-8333-333333333333",
           "alpha", 2, "beta", 20_i64, 40_i64, "hail-signature"

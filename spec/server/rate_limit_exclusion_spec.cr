@@ -171,13 +171,16 @@ describe "authenticated ship rate-limit exclusions" do
       now = Time.instant
       while api.transmission_buckets.admit("127.0.0.1/32", 1, now).nil?
       end
+      paths = Tinrelay::LocalPaths.new("alpha", root)
+      outgoing = Tinrelay::OutgoingStore.new(paths.outgoing, "alpha")
       limited = expect_raises(Tinrelay::TransmissionLimited) do
-        alpha.send("steward@beta", "ordinary window applies again")
+        alpha.send(
+          "steward@beta", "ordinary window applies again", outgoing: outgoing
+        )
       end
       limited.retry_after_seconds.should be > 0
       limited.sender_ship.should eq("alpha")
-      outbox = Tinrelay::Outbox.new("#{alpha.keyring.path}.outbox")
-      outbox.list.map(&.transmission_id).should contain(limited.transmission_id)
+      outgoing.list_outbox.map(&.transmission_id).should contain(limited.transmission_id)
       limited_hail = alpha.hail("delta")
       api.database.db.scalar(
         "SELECT COUNT(*) FROM transmissions WHERE id = ?", limited.transmission_id

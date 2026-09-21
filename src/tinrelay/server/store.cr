@@ -112,7 +112,7 @@ module Tinrelay
         )
         transmission_rowids = [] of Int64
         expired = 0_i64
-        %w[pending collected expired].each do |state|
+        %w[pending collected withdrawn expired].each do |state|
           remaining = CLEANUP_BATCH_SIZE - transmission_rowids.size
           break if remaining == 0
           selected = connection.query_all(

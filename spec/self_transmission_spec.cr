@@ -51,7 +51,7 @@ describe "ordinary self-transmission" do
       mapping = {"" => "ship-task", "*" => "fallback-task"}
       (mapping[event.name.not_nil!]? || mapping["*"]).should eq("ship-task")
       JSON.parse(event.wrapper.lines[1])["attention_label"].as_s.should eq("")
-      spool.get(event.local_id).as(Tinrelay::TransmissionSpoolRecord)
+      spool.get(event.kind, event.source_id).as(Tinrelay::TransmissionSpoolRecord)
         .signed_transmission.to_label.should eq("")
     end
   end
@@ -80,16 +80,16 @@ describe "ordinary self-transmission" do
       event.name.should eq("steward")
       event.wrapper.should eq(
         "TINRELAY LOCAL POINTER\n" + {
-          contract:        "tinrelay-local-pointer-v1",
+          contract:        "tinrelay-local-pointer-v2",
           kind:            "transmission",
-          local_id:        event.local_id,
+          transmission_id: event.source_id,
           local_ship:      "harbor",
           sender_ship:     "harbor",
           attention_label: "steward",
         }.to_json
       )
 
-      record = spool.get(event.local_id).as(Tinrelay::TransmissionSpoolRecord)
+      record = spool.get(event.kind, event.source_id).as(Tinrelay::TransmissionSpoolRecord)
       record.sender_ship.should eq("harbor")
       record.recipient_ship.should eq("harbor")
       record.signed_transmission.body.should eq("radio proof")
@@ -97,10 +97,10 @@ describe "ordinary self-transmission" do
         "SELECT COUNT(*) FROM transmissions WHERE id = ?", envelope.transmission_id
       ).as(Int64).should eq(0)
 
-      spool.next_unrouted.not_nil!.local_id.should eq(event.local_id)
-      spool.routed(event.local_id)
+      spool.next_unrouted.not_nil!.source_id.should eq(event.source_id)
+      spool.routed(event.kind, event.source_id)
       spool.next_unrouted.should be_nil
-      spool.get(event.local_id).as(Tinrelay::TransmissionSpoolRecord)
+      spool.get(event.kind, event.source_id).as(Tinrelay::TransmissionSpoolRecord)
         .signed_transmission.body.should eq("radio proof")
       ship.keyring.data.contacts.should be_empty
       api.database.db.scalar("SELECT COUNT(*) FROM relationships").as(Int64).should eq(0)
@@ -120,13 +120,13 @@ describe "ordinary self-transmission" do
       ).should eq({"pending", 1_i64})
 
       absent_event = ship.radio_wait(spool, hold_seconds: 0)
-      spool.get(absent_event.local_id).as(Tinrelay::TransmissionSpoolRecord)
+      spool.get(absent_event.kind, absent_event.source_id).as(Tinrelay::TransmissionSpoolRecord)
         .signed_transmission.body.should eq("waiter absent")
       api.database.db.query_one(
         "SELECT state, ciphertext IS NULL FROM transmissions WHERE id = ?",
         absent.transmission_id, as: {String, Int64}
       ).should eq({"collected", 1_i64})
-      spool.routed(absent_event.local_id)
+      spool.routed(absent_event.kind, absent_event.source_id)
 
       capture = SelfTransmissionCaptureRemote.new(origin)
       Tinrelay::Client.new(ship.keyring, capture)

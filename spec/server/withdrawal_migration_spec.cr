@@ -1,13 +1,13 @@
 require "../spec_helper"
 
-module TinrelayPendingCiphertextIndexSpec
-  def self.build_schema_002(path : String) : Nil
+module TinrelayWithdrawalMigrationSpec
+  def self.build_schema_003(path : String) : Nil
     database = DB.open("sqlite3://#{URI.encode_path(path)}?foreign_keys=on")
     database.exec(
       "CREATE TABLE schema_migrations " +
       "(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL) STRICT"
     )
-    Tinrelay::Database::MIGRATIONS.first(2).each do |version, sql|
+    Tinrelay::Database::MIGRATIONS.first(3).each do |version, sql|
       sql.split(';').each do |statement|
         statement = statement.strip
         database.exec(statement) unless statement.empty?
@@ -38,61 +38,53 @@ module TinrelayPendingCiphertextIndexSpec
       )
     end
 
-    pending_sql = <<-SQL
+    insert = <<-SQL
         INSERT INTO transmissions(
           id, sender_ship, sender_signing_generation,
           recipient_ship, recipient_encryption_generation,
           created_at, expires_at, accepted_at, state,
           ciphertext, signature, envelope_digest
-        ) VALUES (?, 'sender', 1, 'recipient', 1, ?, ?, ?, 'pending', ?, X'01', X'01')
+        ) VALUES (?, 'sender', 1, 'recipient', 1, 1, 10, 2, ?, ?, ?, ?)
       SQL
-    256.times do |index|
-      ciphertext_bytes = index.even? ? 17_408 : 512
-      database.exec(
-        pending_sql, "pending-#{index}", 1_000_000 + index,
-        2_000_000 + index, 1_000_000 + index,
-        Bytes.new(ciphertext_bytes, 1_u8)
-      )
-    end
-    collected_sql = <<-SQL
-        INSERT INTO transmissions(
-          id, sender_ship, sender_signing_generation,
-          recipient_ship, recipient_encryption_generation,
-          created_at, expires_at, accepted_at, state,
-          ciphertext, signature, envelope_digest
-        ) VALUES (?, 'sender', 1, 'recipient', 1, ?, ?, ?, 'collected', NULL, NULL, X'01')
-      SQL
-    64.times do |index|
-      database.exec(
-        collected_sql, "collected-#{index}", 1_000_000 + index,
-        2_000_000 + index,
-        1_000_000 + index
-      )
-    end
+    database.exec(insert, "pending", "pending", Bytes[1_u8], Bytes[2_u8], Bytes[3_u8])
+    database.exec(insert, "collected", "collected", nil, nil, Bytes[4_u8])
   ensure
     database.try(&.close)
   end
 end
 
-describe "the pending ciphertext metrics index" do
-  it "upgrades a populated schema and covers the pending-byte aggregate" do
+describe "the withdrawn transmission migration" do
+  it "preserves populated rows, foreign keys, and all transmission indexes" do
     root = TinrelaySpec.temporary_root
     path = File.join(root, "service.db")
-    TinrelayPendingCiphertextIndexSpec.build_schema_002(path)
+    TinrelayWithdrawalMigrationSpec.build_schema_003(path)
 
     database = Tinrelay::Database.new(path)
-    store = Tinrelay::Store.new(database)
-
     database.db.scalar("SELECT MAX(version) FROM schema_migrations").should eq(4_i64)
-    store.metrics_snapshot(1_000_000_i64)[:ciphertext_bytes].should eq(2_293_760_i64)
+    database.db.query_all(
+      "SELECT id, state, ciphertext, signature, envelope_digest " +
+      "FROM transmissions ORDER BY id",
+      as: {String, String, Bytes?, Bytes?, Bytes}
+    ).should eq([
+      {"collected", "collected", nil, nil, Bytes[4_u8]},
+      {"pending", "pending", Bytes[1_u8], Bytes[2_u8], Bytes[3_u8]},
+    ])
+    database.db.query_all(
+      "SELECT name FROM sqlite_schema WHERE type = 'index' " +
+      "AND tbl_name = 'transmissions' AND sql IS NOT NULL ORDER BY name",
+      as: String
+    ).should eq(%w[pending_ciphertext_bytes pending_delivery transmissions_cleanup])
+    database.db.query_all("PRAGMA foreign_key_check", as: {String, Int64, String, Int64})
+      .should be_empty
 
-    plan = database.db.query_all(
-      "EXPLAIN QUERY PLAN " +
-      "SELECT COALESCE(SUM(LENGTH(ciphertext)), 0) FROM transmissions " +
-      "WHERE state = 'pending'",
-      as: {Int64, Int64, Int64, String}
-    ).map { |row| row[3] }
-    plan.any?(&.includes?("USING COVERING INDEX pending_ciphertext_bytes")).should be_true
+    database.db.exec(
+      "UPDATE transmissions SET state = 'withdrawn', ciphertext = NULL, " +
+      "signature = NULL WHERE id = 'pending'"
+    )
+    database.db.query_one(
+      "SELECT state, ciphertext, signature FROM transmissions WHERE id = 'pending'",
+      as: {String, Bytes?, Bytes?}
+    ).should eq({"withdrawn", nil, nil})
   ensure
     database.try(&.close)
     FileUtils.rm_r(root) if root && Dir.exists?(root)

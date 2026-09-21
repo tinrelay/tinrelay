@@ -114,10 +114,15 @@ describe "tinrelay send CLI input" do
       )
       status.success?.should be_true
       error.should be_empty
-      JSON.parse(output)["state"].as_s.should eq("accepted")
+      sent = JSON.parse(output)
+      sent["state"].as_s.should eq("accepted")
+      sent["transmission_id"].as_s.should match(Tinrelay::Outbox::UUID)
+      sent.as_h.keys.sort.should eq(%w(
+        recipient_ship sender_ship state transmission_id
+      ))
 
       event = client.radio_wait(Tinrelay::Spool.new(paths.spool), hold_seconds: 0)
-      record = Tinrelay::Spool.new(paths.spool).get(event.local_id)
+      record = Tinrelay::Spool.new(paths.spool).get(event.kind, event.source_id)
         .as(Tinrelay::TransmissionSpoolRecord)
       record.signed_transmission.body.should eq("body from process stdin\n")
     end
@@ -140,10 +145,12 @@ describe "tinrelay send CLI input" do
         )
         status.success?.should be_true
         error.should be_empty
-        JSON.parse(output)["state"].as_s.should eq("accepted")
+        sent = JSON.parse(output)
+        sent["state"].as_s.should eq("accepted")
+        sent["transmission_id"].as_s.should match(Tinrelay::Outbox::UUID)
 
         event = client.radio_wait(Tinrelay::Spool.new(paths.spool), hold_seconds: 0)
-        record = Tinrelay::Spool.new(paths.spool).get(event.local_id)
+        record = Tinrelay::Spool.new(paths.spool).get(event.kind, event.source_id)
           .as(Tinrelay::TransmissionSpoolRecord)
         record.signed_transmission.body.should eq("body from non-home cwd\n")
       end
@@ -173,12 +180,14 @@ describe "tinrelay send CLI input" do
           )
           status.success?.should be_true
           error.should be_empty
-          accepted = JSON.parse(output)
-          accepted["state"].as_s.should eq("accepted")
+          sent = JSON.parse(output)
+          sent["state"].as_s.should eq("accepted")
+          sent["transmission_id"].as_s.should match(Tinrelay::Outbox::UUID)
 
           event = JSON.parse(listener.receive)
           event["contract"].as_s.should eq(Tinrelay::OutgoingObserver::CONTRACT)
-          event["transmission_id"].as_s.should eq(accepted["transmission_id"].as_s)
+          event["transmission_id"].as_s.should eq(sent["transmission_id"].as_s)
+          event.as_h.has_key?("local_id").should be_false
           event["sender_ship"].as_s.should eq("alpha")
           event["recipient_ship"].as_s.should eq("alpha")
           event["body"].as_s.should eq("body observed from built CLI\n")
@@ -259,6 +268,66 @@ describe "tinrelay outbox CLI" do
   end
 end
 
+describe "tinrelay sent and withdrawal CLI" do
+  it "uses the transmission id for append-only sent evidence and blind withdrawal" do
+    TinrelaySpec.with_server do |root, origin, _api|
+      home = File.join(root, "home")
+      paths = Tinrelay::LocalPaths.new("alpha", home)
+      client = Tinrelay::Client.join(
+        paths.keyring, origin, "alpha", paths.owner_key
+      )
+
+      send_status, send_output, send_error = TinrelayCliSpec.run(
+        ["--ship", "alpha", "send", "notes@alpha", "--as", "rowan"],
+        "keep these exact words\n",
+        home
+      )
+      send_status.success?.should be_true
+      send_error.should be_empty
+      sent = JSON.parse(send_output)
+      transmission_id = sent["transmission_id"].as_s
+      transmission_id.should match(Tinrelay::Outbox::UUID)
+      sent["state"].as_s.should eq("accepted")
+
+      outgoing = Tinrelay::OutgoingStore.new(paths.outgoing, "alpha")
+      before = File.read(outgoing.sent_path(transmission_id))
+
+      list_status, list_output, list_error = TinrelayCliSpec.run(
+        ["--ship", "alpha", "sent", "list"], "", home
+      )
+      list_status.success?.should be_true
+      list_error.should be_empty
+      listed = JSON.parse(list_output)
+      listed["transmission_id"].as_s.should eq(transmission_id)
+      listed["destination"].as_s.should eq("notes@alpha")
+      listed["withdrawal_requested"].as_bool.should be_false
+      list_output.should_not contain("keep these exact words")
+
+      show_status, show_output, show_error = TinrelayCliSpec.run(
+        ["--ship", "alpha", "sent", "show", transmission_id], "", home
+      )
+      show_status.success?.should be_true
+      show_error.should be_empty
+      shown = JSON.parse(show_output)
+      shown["body"].as_s.should eq("keep these exact words\n")
+      shown["author_label"].as_s.should eq("rowan")
+      shown["transmission_id"].as_s.should eq(transmission_id)
+
+      withdraw_status, withdraw_output, withdraw_error = TinrelayCliSpec.run(
+        ["--ship", "alpha", "withdraw", transmission_id], "", home
+      )
+      withdraw_status.success?.should be_true
+      withdraw_error.should be_empty
+      JSON.parse(withdraw_output).should eq(JSON.parse(
+        {state: "withdrawal_requested", transmission_id: transmission_id}.to_json
+      ))
+      File.read(outgoing.sent_path(transmission_id)).should eq(before)
+      outgoing.withdrawal_requested?(transmission_id).should be_true
+      client.radio_poll(Tinrelay::Spool.new(paths.spool)).should be_nil
+    end
+  end
+end
+
 describe "tinrelay nested contact commands" do
   it "allows, closes, and unblocks the authenticated peer from a local hail ID" do
     TinrelaySpec.with_server do |root, origin, api|
@@ -273,13 +342,13 @@ describe "tinrelay nested contact commands" do
       event = beta.radio_wait(Tinrelay::Spool.new(paths.spool), hold_seconds: 0)
 
       status, output, error = TinrelayCliSpec.run(
-        ["--ship", "beta", "contact", "allow", event.local_id], "", home
+        ["--ship", "beta", "contact", "allow", event.source_id], "", home
       )
       status.success?.should be_true
       error.should be_empty
       result = JSON.parse(output)
       result["peer_ship"].as_s.should eq("alpha")
-      result["local_hail_id"].as_s.should eq(event.local_id)
+      result["hail_id"].as_s.should eq(event.source_id)
       api.database.db.query_one(
         "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'beta'",
         as: String
@@ -338,6 +407,48 @@ describe "tinrelay local key migration" do
     result["state"].as_s.should eq("current")
     result["ship"].as_s.should eq("alpha")
     Dir.exists?(home).should be_false
+  ensure
+    FileUtils.rm_r(root) if root && Dir.exists?(root)
+  end
+
+  it "requires and performs the temporary incoming source-identity migration" do
+    root = TinrelaySpec.temporary_root
+    home = File.join(root, "home")
+    paths = Tinrelay::LocalPaths.new("alpha", home)
+    spool = Tinrelay::Spool.new(paths.spool)
+    transmission_id = "11111111-1111-4111-8111-111111111111"
+    reason = "unusable_envelope"
+    evidence_id = Tinrelay::RejectionEvidence.id(transmission_id, reason)
+    legacy_path = File.join(spool.pending, "#{evidence_id}.json")
+    Tinrelay::AtomicPrivateFile.write(
+      legacy_path,
+      {
+        format: 1, kind: "rejected_transmission", local_id: evidence_id,
+        received_at: 10_i64, relay_transmission_id: transmission_id,
+        rejection_reason: reason,
+      }.to_json + '\n'
+    )
+
+    list_status, _list_output, list_error = TinrelayCliSpec.run(
+      ["--ship", "alpha", "inbox", "list"], "", home
+    )
+    list_status.success?.should be_false
+    JSON.parse(list_error)["message"].as_s.should eq(
+      "local inbox format requires `tinrelay migrate`"
+    )
+
+    status, output, error = TinrelayCliSpec.run(
+      ["--ship", "alpha", "migrate"], "", home
+    )
+    status.success?.should be_true
+    error.should be_empty
+    JSON.parse(output)["state"].as_s.should eq("current")
+    File.exists?(legacy_path).should be_false
+    migrated = Tinrelay::Spool.open_existing(paths.spool)
+      .get("rejected_transmission", evidence_id)
+      .as(Tinrelay::RejectedTransmissionSpoolRecord)
+    migrated.transmission_id.should eq(transmission_id)
+    migrated.rejection_reason.should eq(reason)
   ensure
     FileUtils.rm_r(root) if root && Dir.exists?(root)
   end

@@ -5,7 +5,8 @@ require "../tinrelay/platform/private_storage"
 require "./child_lifetime"
 
 module TinrelayCodexBridge
-  VERSION = "0.2.1"
+  VERSION     = "0.3.0"
+  SOURCE_UUID = /\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/
 
   class Blocked < Exception; end
 
@@ -80,9 +81,9 @@ module TinrelayCodexBridge
     def emit(
       state : String,
       reason : String? = nil,
-      local_id : String? = nil,
+      source_id : String? = nil,
     )
-      @io.puts({state: state, reason: reason, local_id: local_id}.to_json)
+      @io.puts({state: state, reason: reason, source_id: source_id}.to_json)
       @io.flush
     end
   end
@@ -145,15 +146,20 @@ module TinrelayCodexBridge
 
     private def validate(raw) : Tuple(String, String, String, String?)
       value = JSON.parse(raw)
-      unless value.as_h["contract"].as_s == "tinrelay-radio-wait-v1"
+      unless value.as_h["contract"].as_s == "tinrelay-radio-wait-v2"
         raise Blocked.new("invalid_radio_contract")
       end
-      id = value.as_h["local_id"].as_s
+      id = value.as_h["source_id"].as_s
       kind = value.as_h["kind"].as_s
-      raise Blocked.new("invalid_local_id") unless /\Atr_[0-9a-f]{32}\z/.matches?(id)
       unless {"transmission", "hail", "rejected_transmission"}.includes?(kind)
         raise Blocked.new("invalid_event_kind")
       end
+      valid_id = if kind == "rejected_transmission"
+                   /\Atr_[0-9a-f]{32}\z/.matches?(id)
+                 else
+                   SOURCE_UUID.matches?(id)
+                 end
+      raise Blocked.new("invalid_source_id") unless valid_id
       wrapper = value.as_h["wrapper"].as_s
       raise Blocked.new("invalid_wrapper") if wrapper.empty?
       name = value.as_h["name"]?
@@ -163,7 +169,7 @@ module TinrelayCodexBridge
       elsif name && !name.raw.nil?
         raise Blocked.new("invalid_event_name")
       end
-      allowed = {"contract", "local_id", "kind", "wrapper", "name"}
+      allowed = {"contract", "source_id", "kind", "wrapper", "name"}
       unless value.as_h.keys.all? { |key| allowed.includes?(key) }
         raise Blocked.new("unknown_event_field")
       end

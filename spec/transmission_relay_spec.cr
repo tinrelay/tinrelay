@@ -202,7 +202,7 @@ describe "transmission relay transitions" do
       rejected.kind.should eq("rejected_transmission")
       rejected.name.should be_nil
       rejected.wrapper.should_not contain("body must never survive rejection")
-      rejection_record = spool.get(rejected.local_id)
+      rejection_record = spool.get(rejected.kind, rejected.source_id)
         .as(Tinrelay::RejectedTransmissionSpoolRecord)
       rejection_record.rejection_reason.should eq("unusable_envelope")
       api.database.db.query_one(
@@ -210,7 +210,7 @@ describe "transmission relay transitions" do
         unusable.transmission_id, as: {String, Int64}
       ).should eq({"collected", 1_i64})
 
-      spool.routed(rejected.local_id)
+      spool.routed(rejected.kind, rejected.source_id)
       rejected_plaintext = alpha.radio_wait(spool, hold_seconds: 0)
       rejected_plaintext.kind.should eq("rejected_transmission")
       rejected_plaintext.wrapper.should_not contain("body also must not survive")
@@ -218,11 +218,11 @@ describe "transmission relay transitions" do
         "SELECT state, ciphertext IS NULL FROM transmissions WHERE id = ?",
         invalid_plaintext.transmission_id, as: {String, Int64}
       ).should eq({"collected", 1_i64})
-      spool.routed(rejected_plaintext.local_id)
+      spool.routed(rejected_plaintext.kind, rejected_plaintext.source_id)
 
       delivered = alpha.radio_wait(spool, hold_seconds: 0)
       delivered.kind.should eq("transmission")
-      spool.get(delivered.local_id).as(Tinrelay::TransmissionSpoolRecord)
+      spool.get(delivered.kind, delivered.source_id).as(Tinrelay::TransmissionSpoolRecord)
         .signed_transmission.body.should eq("valid behind unusable")
       delivered.wrapper.should_not contain("valid behind unusable")
       valid.transmission_id.should_not be_empty
@@ -361,7 +361,7 @@ describe "transmission relay transitions" do
       api.database.db.scalar(
         "SELECT COUNT(*) FROM transmissions WHERE id = ?", direct.transmission_id
       ).as(Int64).should eq(0_i64)
-      spool.routed(event.local_id)
+      spool.routed(event.kind, event.source_id)
       TinrelayRelaySpec.post(
         origin, direct, "2001:db8:2::2"
       ).status_code.should eq(202)
@@ -456,7 +456,8 @@ describe "transmission relay transitions" do
       direct = TinrelayRelaySpec.elapsed do
         direct_message = beta.send("steward@alpha", "direct timing")
       end
-      spool.routed(TinrelaySpec.receive(direct_event).local_id)
+      received = TinrelaySpec.receive(direct_event)
+      spool.routed(received.kind, received.source_id)
 
       fallback = TinrelayRelaySpec.elapsed do
         beta.send("steward@alpha", "fallback timing")
@@ -640,13 +641,15 @@ describe "transmission relay transitions" do
         unreliable.retry(outbox, envelope.transmission_id)
       end
       failure.transmission_id.should eq(envelope.transmission_id)
+      failure.message.to_s.should contain("outbox retry #{envelope.transmission_id}")
+      failure.message.to_s.should contain("outbox retry #{failure.transmission_id}")
       event = TinrelaySpec.receive(received)
       api.database.db.scalar(
         "SELECT COUNT(*) FROM transmissions WHERE id = ?",
         envelope.transmission_id
       ).as(Int64).should eq(0_i64)
       outbox.list.map(&.transmission_id).should eq([envelope.transmission_id])
-      spool.routed(event.local_id)
+      spool.routed(event.kind, event.source_id)
 
       beta.retry(outbox, envelope.transmission_id)
       outbox.list.should be_empty

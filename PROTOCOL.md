@@ -230,24 +230,47 @@ and discarded accepted outcomes return no earlier than a common 250 ms local
 acceptance target. This is a causal minimum schedule, not a claim that network or
 machine latency is constant; work exceeding the target returns later.
 
-Before submission the sender atomically stores the exact signed encrypted envelope
-in one private outbox file. Confirmed acceptance and terminal non-retryable rejection
-delete it. An ambiguous transport result reports acceptance unknown and retains that
-exact envelope for an explicit retry with the same signature and ID. A definite
-retry-later transmission limit also retains it for that exact-ID retry. The outbox is
-not a correspondence archive or delivery workflow and does not persist why an
-envelope remains.
+Before submission the sender atomically stores one private outgoing record containing
+the exact signed plaintext, signed encrypted envelope, transmission ID, and the
+public owner/radio evidence needed to verify both signatures after key retirement.
+Directory placement is the only relay-acceptance state: `outbox/` means acceptance is
+unknown; confirmed acceptance atomically moves the same bytes to append-only `sent/`.
+A terminal rejection of the initial in-process attempt may remove that new record.
+After an ambiguous result, no later rejection can disprove earlier acceptance, so the
+record remains inspectable even after expiry makes it non-retryable. Definite
+retry-later transmission limits retain the same exact-retry authority. Older
+envelope-only outbox files remain a bounded UUID-addressed recovery path and never
+become fabricated sent correspondence.
+
+The sender may sign `transmission.withdraw` with its current active radio over one
+internal transmission UUID. For every well-formed authenticated request, the relay
+returns the same HTTP 202 body and minimum 250 ms schedule whether the named row is
+pending, collected, withdrawn, expired, absent, or belongs to another sender. Inside
+one writer transaction, only a matching sender-owned pending row changes to
+`withdrawn`; ciphertext and signature are erased immediately, while the digest and
+routing metadata remain as a content-free exact-replay tombstone through signed
+expiry. Direct handoffs have no row and are necessarily blind no-ops. Withdrawal uses
+the existing source-address transmission bucket and exposes no sender-visible effect
+query or status.
+
+A definitively accepted withdrawal writes a deterministic content-free local marker
+beside the immutable sent record. That marker says only `withdrawal requested`; it is
+not proof that pending ciphertext existed or was erased. Ambiguity writes no marker
+and is safely retryable. Acceptance-unknown outbox attempts are not withdrawable.
 
 `tinrelay --ship "$SHIP" radio wait` repeats bounded 100-second long polls. The
 official client allows 115 seconds for the HTTP response. WebSockets and permanent
 voicemail are absent.
-On verified receipt it atomically spools and returns one opaque local
-ID, complete fixed safe wrapper, and the authenticated local attention name only
-for a transmission. Relay cleanup acknowledgement is best effort after that durable
-local boundary. If cleanup is unavailable, the pointer remains locally surfaceable;
+On verified receipt it atomically spools and returns one source identity, evidence
+kind, complete fixed safe wrapper, and the authenticated local attention name only
+for a transmission. A valid transmission uses its signed `transmission_id`; a hail
+uses its signed `hail_id`; only local rejected evidence uses a deterministic
+`tr_...` evidence ID derived from transmission ID and rejection reason. Relay cleanup
+acknowledgement is best effort after that durable local boundary. If cleanup is
+unavailable, the pointer remains locally surfaceable;
 a retained relay duplicate is deduplicated and acknowledged when it appears later.
 It returns no task identifier or harness route. An envelope that cannot be
-authenticated, decrypted, decoded, or reconciled with a prior local transmission ID
+authenticated, decrypted, decoded, or reconciled with the prior record for that transmission ID
 instead produces durable content-free local rejection evidence, is acknowledged for
 relay erasure, and returns a fixed wrapper with no sender attribution or attention
 name; it
@@ -255,7 +278,7 @@ cannot wedge valid traffic behind it. Every later wait first resurfaces
 the oldest locally unrouted record. Each private spool file has one strict `kind`
 discriminator and exactly one visible evidence shape: signed transmission, rejected
 transmission, or content-free hail. Fields from another kind are a corrupt record,
-not ignored nullable data. A local harness adapter moves the exact ID to the routed
+not ignored nullable data. A local harness adapter moves the exact kind and source ID to the routed
 directory only after its own delivery contract reports receipt. How an adapter
 preserves an uncertain receipt across restart belongs above this protocol. A crash
 after durable spooling but before relay cleanup leaves the local pointer available;
@@ -263,8 +286,8 @@ the bounded relay copy may be deduplicated and acknowledged later. The routed
 directory is the local completion boundary; any later handling or reading belongs
 above TinRelay. Process death naturally removes parked-wait availability.
 
-`tinrelay --ship "$SHIP" radio status "$LOCAL_ID"` is outside the wire protocol. It
-reads and verifies only that exact local spool record in pending or routed,
+`tinrelay --ship "$SHIP" radio status "$KIND" "$SOURCE_ID"` is outside the wire
+protocol. It reads and verifies only that exact local spool record in pending or routed,
 reports `pending` or `routed`, and neither contacts the repeater nor mutates the
 spool. Missing and corrupt local evidence are explicit failures.
 
@@ -273,7 +296,7 @@ object. It is exactly two UTF-8 LF-separated lines (with an optional final LF):
 
 ```text
 TINRELAY LOCAL POINTER
-{"contract":"tinrelay-local-pointer-v1","kind":"transmission","local_id":"tr_<32 lowercase hex>","local_ship":"<receiving ship>","sender_ship":"<authenticated sender ship>","attention_label":"<authenticated attention label, possibly empty>"}
+{"contract":"tinrelay-local-pointer-v2","kind":"transmission","transmission_id":"<signed transmission UUID>","local_ship":"<receiving ship>","sender_ship":"<authenticated sender ship>","attention_label":"<authenticated attention label, possibly empty>"}
 ```
 
 The JSON is compact and has exactly those keys in that order. It contains no
@@ -303,9 +326,10 @@ Enforced defaults:
 - 96-hour maximum pending transmission;
 - immediate repeater payload deletion on acknowledgement;
 - no relay row or tombstone on acknowledged direct handoff;
-- content-free fallback tombstones only through the signed envelope's expiry;
-- local encrypted outbox retention after ambiguous outcomes or definite retry-later
-  transmission limits, never beyond the envelope's 96-hour expiry;
+- content-free collected or withdrawn fallback tombstones only through the signed
+  envelope's expiry;
+- private outgoing outbox evidence retained after ambiguity even beyond the envelope's
+  retryable 96-hour lifetime; accepted sent evidence is append-only;
 - immutable private plaintext records retained after routing; routing atomically
   moves a record from pending to routed and never rewrites its bytes.
 

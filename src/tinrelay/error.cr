@@ -104,6 +104,36 @@ module Tinrelay
     end
   end
 
+  class WithdrawalAcceptanceUnknown < Error
+    getter transmission_id : String
+    getter sender_ship : String
+
+    def initialize(@transmission_id, @sender_ship, detail : String? = nil)
+      suffix = detail ? ": #{detail}" : ""
+      super(
+        "relay acceptance is unknown for withdrawal of #{transmission_id}; retry with: " +
+        "tinrelay --ship #{sender_ship} withdraw #{transmission_id}#{suffix}"
+      )
+    end
+  end
+
+  class WithdrawalLimited < Unavailable
+    getter retry_after_seconds : Int64
+    getter transmission_id : String
+    getter sender_ship : String
+
+    def initialize(@retry_after_seconds, @transmission_id, @sender_ship)
+      super(
+        "relay transmission limit reached; try again in " +
+        "#{retry_after_seconds} seconds; retry with: " +
+        "tinrelay --ship #{sender_ship} withdraw #{transmission_id}"
+      )
+    end
+  end
+
+  class UnsupportedFeature < Error
+  end
+
   class HailAcceptanceUnknown < Error
     getter sender_ship : String
     getter recipient_ship : String

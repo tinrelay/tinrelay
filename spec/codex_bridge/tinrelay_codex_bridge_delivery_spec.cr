@@ -41,19 +41,19 @@ describe "tinrelay-codex-bridge delivery contract" do
       lines = prompt.lines
       lines.first.should eq("TINRELAY MESSAGE DELIVERY")
       delivery = JSON.parse(lines[1])
-      delivery["contract"].as_s.should eq("tinrelay-message-delivery-v1")
+      delivery["contract"].as_s.should eq("tinrelay-message-delivery-v2")
       delivery.as_h.keys.sort.should eq([
         "attention_label",
         "author_label",
         "body",
         "contract",
         "kind",
-        "local_id",
         "local_ship",
         "received_at",
         "sender_ship",
+        "transmission_id",
       ])
-      delivery["local_id"].as_s.should eq(event[:local_id])
+      delivery["transmission_id"].as_s.should eq(event[:source_id])
       delivery["sender_ship"].as_s.should eq("remote")
       delivery["attention_label"].as_s.should eq("operator")
       delivery["author_label"].as_s.should eq("sender")
@@ -75,7 +75,7 @@ describe "tinrelay-codex-bridge delivery contract" do
         event = TinrelayCodexBridgeProcessSpec.event
         h.config["events"] = JSON.parse([event].to_json)
         h.add_inbox_record(event)
-        record = h.config["inbox_records"][event[:local_id]].as_h
+        record = h.config["inbox_records"][event[:source_id]].as_h
         if received_at
           record["received_at"] = received_at
         else

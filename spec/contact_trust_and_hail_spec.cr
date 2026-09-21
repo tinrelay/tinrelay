@@ -46,7 +46,7 @@ describe "contact trust and content-free hails" do
       alpha.hail("beta")
       event = beta.radio_wait(beta_spool, hold_seconds: 0)
       event.kind.should eq("hail")
-      inspection = JSON.parse(beta_spool.inspection(event.local_id))
+      inspection = JSON.parse(beta_spool.inspection(event.kind, event.source_id))
       inspection["sender_owner_fingerprint"].as_s.should eq(
         Tinrelay::Crypto.fingerprint(
           Tinrelay::Crypto.unb64(alpha.keyring.data.owner_public_key)
@@ -57,11 +57,11 @@ describe "contact trust and content-free hails" do
           alpha.keyring.data.radio!.certificate.unsigned_bytes
         )
       )
-      beta_spool.routed(event.local_id)
+      beta_spool.routed(event.kind, event.source_id)
       beta.keyring.data.contacts.should be_empty
       alpha.keyring.data.contacts.should be_empty
 
-      beta.allow_contact(event.local_id, beta_spool)
+      beta.allow_contact(event.source_id, beta_spool)
       beta.keyring.data.contact!("alpha").radio_certificate.to_json.should eq(
         alpha.keyring.data.radio!.certificate.to_json
       )
@@ -74,8 +74,8 @@ describe "contact trust and content-free hails" do
       beta.hail("alpha")
       return_event = alpha.radio_wait(alpha_spool, hold_seconds: 0)
       return_event.kind.should eq("hail")
-      alpha_spool.routed(return_event.local_id)
-      alpha.allow_contact(return_event.local_id, alpha_spool)
+      alpha_spool.routed(return_event.kind, return_event.source_id)
+      alpha.allow_contact(return_event.source_id, alpha_spool)
       alpha.keyring.data.contact!("beta").radio_certificate.to_json.should eq(
         beta.keyring.data.radio!.certificate.to_json
       )
@@ -83,8 +83,8 @@ describe "contact trust and content-free hails" do
       first = alpha.send("steward@beta", "Hello from alpha")
       received = beta.radio_wait(beta_spool, hold_seconds: 0)
       received.kind.should eq("transmission")
-      beta_spool.get(received.local_id).as(Tinrelay::TransmissionSpoolRecord)
-        .relay_transmission_id.should eq(first.transmission_id)
+      beta_spool.get(received.kind, received.source_id).as(Tinrelay::TransmissionSpoolRecord)
+        .transmission_id.should eq(first.transmission_id)
     end
   end
 
@@ -101,7 +101,7 @@ describe "contact trust and content-free hails" do
       event.name.should be_nil
       event.wrapper.should contain("Registry-observed sender ship: beta")
       event.wrapper.should_not contain("steward")
-      spool.get(event.local_id).should be_a(Tinrelay::HailSpoolRecord)
+      spool.get(event.kind, event.source_id).should be_a(Tinrelay::HailSpoolRecord)
       api.database.db.query_one(
         "SELECT collected_at IS NOT NULL FROM hails WHERE id = ?", hail.hail_id,
         as: Int64
@@ -130,7 +130,7 @@ describe "contact trust and content-free hails" do
       spool = Tinrelay::Spool.new(File.join(root, "alpha-attention"))
       collected = alpha.radio_wait(spool, hold_seconds: 0)
       collected.kind.should eq("hail")
-      spool.routed(collected.local_id)
+      spool.routed(collected.kind, collected.source_id)
       api.database.db.scalar(
         "SELECT COUNT(*) FROM hails " +
         "WHERE recipient_ship = 'alpha' AND allowed_at IS NULL"
@@ -148,8 +148,8 @@ describe "contact trust and content-free hails" do
       sent = beta.send("steward@alpha", "established correspondence advances")
       received = alpha.radio_wait(spool, hold_seconds: 0)
       received.kind.should eq("transmission")
-      spool.get(received.local_id).as(Tinrelay::TransmissionSpoolRecord)
-        .relay_transmission_id.should eq(sent.transmission_id)
+      spool.get(received.kind, received.source_id).as(Tinrelay::TransmissionSpoolRecord)
+        .transmission_id.should eq(sent.transmission_id)
     end
   end
 
@@ -188,8 +188,8 @@ describe "contact trust and content-free hails" do
         unreliable.hail("alpha")
       end
       event = alpha.radio_wait(spool, hold_seconds: 0)
-      spool.routed(event.local_id)
-      alpha.allow_contact(event.local_id, spool)
+      spool.routed(event.kind, event.source_id)
+      alpha.allow_contact(event.source_id, spool)
 
       beta.hail("alpha")
       api.database.db.scalar(

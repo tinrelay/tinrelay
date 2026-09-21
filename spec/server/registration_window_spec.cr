@@ -63,7 +63,7 @@ describe "durable successful ship-registration windows" do
     raw.close
 
     database = Tinrelay::Database.new(path)
-    database.db.scalar("SELECT MAX(version) FROM schema_migrations").should eq(3_i64)
+    database.db.scalar("SELECT MAX(version) FROM schema_migrations").should eq(4_i64)
     database.db.scalar("SELECT COUNT(*) FROM ships").should eq(1_i64)
     database.db.scalar("SELECT COUNT(*) FROM registration_events").should eq(0_i64)
     database.db.scalar(

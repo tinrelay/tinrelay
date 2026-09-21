@@ -25,6 +25,19 @@ module Tinrelay
     end
   end
 
+  module RejectionEvidence
+    ID = /\Atr_[0-9a-f]{32}\z/
+
+    def self.id(transmission_id : String, reason : String) : String
+      digest = Digest::SHA256.hexdigest(
+        Canonical.fields(
+          "tinrelay-local-evidence-v1", "rejection", "#{transmission_id}:#{reason}"
+        )
+      )
+      "tr_#{digest[0, 32]}"
+    end
+  end
+
   module Origin
     def self.validate!(origin : String) : Nil
       uri = URI.parse(origin)

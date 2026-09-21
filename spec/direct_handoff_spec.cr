@@ -76,14 +76,14 @@ describe "direct radio handoff" do
       accepted, accepted_at = TinrelaySpec.receive(sender_result)
       JSON.parse(accepted)["state"].as_s.should eq("accepted")
       (accepted_at - spooled_at).should be < 2.seconds
-      spool.next_unrouted.not_nil!.local_id.should eq(local_record.local_id)
+      spool.next_unrouted.not_nil!.source_id.should eq(local_record.source_id)
       api.database.db.scalar(
         "SELECT COUNT(*) FROM transmissions WHERE id = ?", envelope.transmission_id
       ).as(Int64).should eq(0)
 
       # Loss of the first ack response cannot strand the already-durable local pointer.
       alpha.remote.post("/v1/transmissions/ack", ack.to_json)
-      spool.next_unrouted.not_nil!.local_id.should eq(local_record.local_id)
+      spool.next_unrouted.not_nil!.source_id.should eq(local_record.source_id)
     end
   end
 
@@ -181,7 +181,8 @@ describe "direct radio handoff" do
       end
       TinrelaySpec.eventually { api.handoffs.waiting?("gamma") }
       alpha.send("steward@gamma", "retune checkpoint")
-      gamma_spool.routed(TinrelaySpec.receive(gamma_event).local_id)
+      received = TinrelaySpec.receive(gamma_event)
+      gamma_spool.routed(received.kind, received.source_id)
       gamma.keyring.data.contact!("alpha")
         .radio_certificate.generation.should eq(2)
 
@@ -197,7 +198,7 @@ describe "direct radio handoff" do
       spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
       received = alpha.radio_wait(spool, hold_seconds: 0)
       received.kind.should eq("transmission")
-      spool.get(received.local_id).as(Tinrelay::TransmissionSpoolRecord)
+      spool.get(received.kind, received.source_id).as(Tinrelay::TransmissionSpoolRecord)
         .signed_transmission.body.should eq("new generation fallback")
     end
   end

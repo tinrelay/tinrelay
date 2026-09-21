@@ -8,7 +8,8 @@ module TinrelayCodexBridge
   end
 
   record PendingTargetBinding,
-    local_id : String,
+    kind : String,
+    source_id : String,
     task_id : String,
     state : DeliveryState
 
@@ -27,32 +28,30 @@ module TinrelayCodexBridge
         buffer.to_s
       end
       value = JSON.parse(bytes).as_h
-      keys = value.keys.sort
-      legacy = keys == ["local_id", "task_id"] ||
-               keys == ["local_id", "route", "task_id"]
-      unless legacy || keys == ["local_id", "state", "task_id"]
+      unless value.keys.sort == ["kind", "source_id", "state", "task_id"]
         raise Blocked.new("invalid_pending_target")
       end
-      local_id = value["local_id"].as_s
+      kind = value["kind"].as_s
+      source_id = value["source_id"].as_s
       task_id = value["task_id"].as_s
-      state = legacy ? DeliveryState::Ready : parse_state(value["state"].as_s)
-      raise Blocked.new("invalid_pending_target") unless valid_local_id?(local_id)
+      state = parse_state(value["state"].as_s)
+      raise Blocked.new("invalid_pending_target") unless valid_identity?(kind, source_id)
       raise Blocked.new("invalid_pending_target") unless valid_task_id?(task_id)
-      PendingTargetBinding.new(local_id, task_id, state)
+      PendingTargetBinding.new(kind, source_id, task_id, state)
     rescue File::Error
       raise Blocked.new("pending_target_unreadable")
     rescue JSON::ParseException | TypeCastError | KeyError
       raise Blocked.new("invalid_pending_target")
     end
 
-    def bind(local_id : String, task_id : String) : PendingTargetBinding
+    def bind(kind : String, source_id : String, task_id : String) : PendingTargetBinding
       if current = load
-        unless current.local_id == local_id
+        unless current.kind == kind && current.source_id == source_id
           raise Blocked.new("pending_target_conflict")
         end
         return current
       end
-      write(PendingTargetBinding.new(local_id, task_id, DeliveryState::Ready))
+      write(PendingTargetBinding.new(kind, source_id, task_id, DeliveryState::Ready))
     end
 
     def replace(
@@ -62,12 +61,12 @@ module TinrelayCodexBridge
     ) : PendingTargetBinding
       persisted = load || raise Blocked.new("pending_target_missing")
       raise Blocked.new("pending_target_conflict") unless persisted == current
-      write(PendingTargetBinding.new(current.local_id, task_id, state))
+      write(PendingTargetBinding.new(current.kind, current.source_id, task_id, state))
     end
 
-    def clear(local_id : String)
+    def clear(kind : String, source_id : String)
       current = load || return
-      unless current.local_id == local_id
+      unless current.kind == kind && current.source_id == source_id
         raise Blocked.new("pending_target_conflict")
       end
       Tinrelay::PrivateStorage.delete_replay_safe(@path)
@@ -79,16 +78,24 @@ module TinrelayCodexBridge
       Tinrelay::AtomicPrivateFile.write(
         @path,
         {
-          local_id: binding.local_id,
-          task_id:  binding.task_id,
-          state:    state_name(binding.state),
+          kind:      binding.kind,
+          source_id: binding.source_id,
+          task_id:   binding.task_id,
+          state:     state_name(binding.state),
         }.to_json + '\n'
       )
       binding
     end
 
-    private def valid_local_id?(value)
-      /\Atr_[0-9a-f]{32}\z/.matches?(value)
+    private def valid_identity?(kind, value)
+      case kind
+      when "transmission", "hail"
+        SOURCE_UUID.matches?(value)
+      when "rejected_transmission"
+        /\Atr_[0-9a-f]{32}\z/.matches?(value)
+      else
+        false
+      end
     end
 
     private def valid_task_id?(value)

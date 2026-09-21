@@ -87,12 +87,12 @@ def connect_ships(root : String, first : Tinrelay::Client,
   second_spool = Tinrelay::Spool.new(File.join(root, "#{second.keyring.data.ship}-contact"))
   first.hail(second.keyring.data.ship)
   event = second.radio_wait(second_spool, hold_seconds: 0)
-  second_spool.routed(event.local_id)
-  second.allow_contact(event.local_id, second_spool)
+  second_spool.routed(event.kind, event.source_id)
+  second.allow_contact(event.source_id, second_spool)
   second.hail(first.keyring.data.ship)
   return_event = first.radio_wait(first_spool, hold_seconds: 0)
-  first_spool.routed(return_event.local_id)
-  first.allow_contact(return_event.local_id, first_spool)
+  first_spool.routed(return_event.kind, return_event.source_id)
+  first.allow_contact(return_event.source_id, first_spool)
 end
 
 threads = 4

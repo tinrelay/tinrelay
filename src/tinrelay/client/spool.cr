@@ -1,6 +1,6 @@
 module Tinrelay
   class Spool
-    LOCAL_ID = /\Atr_[0-9a-f]{32}\z/
+    KINDS = {"transmission", "hail", "rejected_transmission"}
 
     getter root : String
     getter pending : String
@@ -20,6 +20,13 @@ module Tinrelay
           end
           PrivateStorage.secure(directory, 0o700)
         end
+        [pending, routed].each do |state_directory|
+          KINDS.each do |kind|
+            directory = File.join(state_directory, kind)
+            Dir.mkdir_p(directory, mode: 0o700) unless Dir.exists?(directory)
+            PrivateStorage.secure(directory, 0o700)
+          end
+        end
       end
     end
 
@@ -33,19 +40,16 @@ module Tinrelay
                            sender_owner_public_key : String,
                            sender_owner_chain : Array(OwnerKeyLink)? = nil,
                            now : Int64 = Time.utc.to_unix) : TransmissionSpoolRecord
-      id = derived_local_id("transmission", envelope.transmission_id)
-      if existing = find_record(id)
-        unless existing.is_a?(TransmissionSpoolRecord)
-          raise Conflict.new("transmission id already names non-transmission evidence")
-        end
+      id = envelope.transmission_id
+      if existing = find_record("transmission", id)
+        existing = existing.as(TransmissionSpoolRecord)
         unless existing.signed_transmission.to_json == transmission.to_json
           raise Conflict.new("transmission id was reused with a different signed transmission")
         end
         return existing
       end
       record = TransmissionSpoolRecord.new(
-        id, now,
-        relay_transmission_id: envelope.transmission_id, sender_ship: envelope.sender_ship,
+        now, sender_ship: envelope.sender_ship,
         recipient_ship: envelope.recipient_ship,
         to_label: transmission.to_label, from_label: transmission.from_label,
         signed_transmission: transmission,
@@ -92,16 +96,12 @@ module Tinrelay
                    owner_chain : Array(OwnerKeyLink),
                    contact_state : String = "stranger",
                    now : Int64 = Time.utc.to_unix) : HailSpoolRecord
-      id = derived_local_id("hail", hail.hail_id)
-      if existing = find_record(id)
-        unless existing.is_a?(HailSpoolRecord)
-          raise Conflict.new("hail id already names another evidence kind")
-        end
-        return existing
+      id = hail.hail_id
+      if existing = find_record("hail", id)
+        return existing.as(HailSpoolRecord)
       end
       record = HailSpoolRecord.new(
-        id, now,
-        hail: hail, sender_owner_chain: owner_chain,
+        now, hail: hail, sender_owner_chain: owner_chain,
         sender_radio_certificate: certificate,
         hail_contact_state: contact_state
       )
@@ -111,17 +111,12 @@ module Tinrelay
 
     def store_rejection(envelope : SignedRelayEnvelope, reason : String,
                         now : Int64 = Time.utc.to_unix) : RejectedTransmissionSpoolRecord
-      id = derived_local_id(
-        "rejection", "#{envelope.transmission_id}:#{reason}"
-      )
-      if existing = find_record(id)
-        unless existing.is_a?(RejectedTransmissionSpoolRecord)
-          raise Conflict.new("rejection id already names another evidence kind")
-        end
-        return existing
+      id = RejectionEvidence.id(envelope.transmission_id, reason)
+      if existing = find_record("rejected_transmission", id)
+        return existing.as(RejectedTransmissionSpoolRecord)
       end
       record = RejectedTransmissionSpoolRecord.new(
-        id, now, relay_transmission_id: envelope.transmission_id,
+        id, now, transmission_id: envelope.transmission_id,
         rejection_reason: reason
       )
       write(record)
@@ -134,37 +129,41 @@ module Tinrelay
 
     def next_unrouted : SpoolRecord?
       each_pending_record.min_by? do |record|
-        path = File.join(pending, "#{record.local_id}.json")
-        {record.received_at, File.info(path).modification_time, record.local_id}
+        path = record_path(pending, record.kind, record.source_id)
+        {record.received_at, File.info(path).modification_time, record.source_id}
       end
     end
 
-    def get(id : String) : SpoolRecord
-      validate_id!(id)
-      find_record(id) || raise NotFound.new("inbox record not found")
+    def get(kind : String, source_id : String) : SpoolRecord
+      validate_identity!(kind, source_id)
+      find_record(kind, source_id) || raise NotFound.new("inbox record not found")
     end
 
-    def status(id : String) : NamedTuple(state: String, local_id: String, kind: String)
-      record = get(id)
+    def status(kind : String, source_id : String) : NamedTuple(
+      state: String,
+      source_id: String,
+      kind: String,
+    )
+      record = get(kind, source_id)
       {
-        state:    record.routed ? "routed" : "pending",
-        local_id: record.local_id,
-        kind:     record.kind,
+        state:     record.routed ? "routed" : "pending",
+        source_id: record.source_id,
+        kind:      record.kind,
       }
     end
 
-    def routed(id : String) : SpoolRecord
-      validate_id!(id)
-      source = File.join(pending, "#{id}.json")
-      destination = File.join(routed, "#{id}.json")
+    def routed(kind : String, source_id : String) : SpoolRecord
+      validate_identity!(kind, source_id)
+      source = record_path(pending, kind, source_id)
+      destination = record_path(routed, kind, source_id)
       if File.file?(destination)
         if File.file?(source)
           move_record(source, destination, "inbox routed destination conflicts")
         end
-        return record_at(destination, id, routed)
+        return record_at(destination, kind, source_id, routed)
       end
 
-      record = get(id)
+      record = get(kind, source_id)
       if File.file?(source)
         move_record(source, destination, "inbox routed destination conflicts")
         record.routed = true
@@ -172,18 +171,18 @@ module Tinrelay
       record
     end
 
-    def inspection(id : String) : String
-      record = get(id)
+    def inspection(kind : String, source_id : String) : String
+      record = get(kind, source_id)
       common = {
-        contract:    "tinrelay-inspected-inbox-v1",
+        contract:    "tinrelay-inspected-inbox-v2",
         kind:        record.kind,
-        local_id:    record.local_id,
         received_at: record.received_at,
         state:       record.routed ? "routed" : "pending",
       }
       case record
       when TransmissionSpoolRecord
         common.merge({
+          transmission_id:  record.transmission_id,
           sender_ship:      record.sender_ship,
           recipient_ship:   record.recipient_ship,
           attention_label:  record.to_label,
@@ -197,9 +196,10 @@ module Tinrelay
         }).to_pretty_json
       when RejectedTransmissionSpoolRecord
         common.merge({
-          relay_transmission_id: record.relay_transmission_id,
-          rejection_reason:      record.rejection_reason,
-          authority_notice:      "Local TinRelay rejection evidence; it asserts no sender " +
+          evidence_id:      record.source_id,
+          transmission_id:  record.transmission_id,
+          rejection_reason: record.rejection_reason,
+          authority_notice: "Local TinRelay rejection evidence; it asserts no sender " +
                             "identity and carries no authority from the local human, " +
                             "user, system, or tools.",
         }).to_pretty_json
@@ -224,11 +224,26 @@ module Tinrelay
       end
     end
 
+    def validate_record_bytes(kind : String, source_id : String,
+                              bytes : String) : SpoolRecord
+      validate_identity!(kind, source_id)
+      record = SpoolRecord.from_json(bytes)
+      unless record.kind == kind && record.source_id == source_id
+        raise Error.new("inbox record identity does not match its path")
+      end
+      verify_record!(record)
+      record
+    rescue ex : JSON::ParseException | JSON::SerializableError
+      raise Error.new("inbox record is corrupt: #{source_id}.json")
+    end
+
     private def write(record : SpoolRecord) : Nil
-      validate_id!(record.local_id)
-      raise Conflict.new("local inbox id already exists") if find_record(record.local_id)
+      validate_identity!(record.kind, record.source_id)
+      if find_record(record.kind, record.source_id)
+        raise Conflict.new("inbox source identity already exists")
+      end
       AtomicPrivateFile.write(
-        File.join(pending, "#{record.local_id}.json"),
+        record_path(pending, record.kind, record.source_id),
         record.to_pretty_json + "\n"
       )
     end
@@ -242,45 +257,37 @@ module Tinrelay
     end
 
     private def each_record_in(directory : String) : Array(SpoolRecord)
+      ensure_current_layout!(directory)
       records = [] of SpoolRecord
-      names = Dir.children(directory).select do |name|
-        name.starts_with?("tr_") && name.ends_with?(".json")
-      end
-      names.sort.each do |name|
-        path = File.join(directory, name)
-        begin
-          record = SpoolRecord.from_json(File.read(path))
-          verify_record!(record)
-          hydrate_state!(record, directory)
-          records << record
-        rescue ex : JSON::ParseException
-          raise Error.new("inbox record is corrupt: #{File.basename(path)}")
+      KINDS.each do |kind|
+        kind_directory = File.join(directory, kind)
+        next unless Dir.exists?(kind_directory)
+        Dir.children(kind_directory).sort.each do |name|
+          next unless name.ends_with?(".json")
+          source_id = File.basename(name, ".json")
+          path = File.join(kind_directory, name)
+          records << record_at(path, kind, source_id, directory)
         end
       end
       records
     end
 
-    private def find_record(id : String) : SpoolRecord?
+    private def find_record(kind : String, source_id : String) : SpoolRecord?
+      ensure_current_layout!(pending)
+      ensure_current_layout!(routed)
       [pending, routed].each do |directory|
-        path = File.join(directory, "#{id}.json")
+        path = record_path(directory, kind, source_id)
         next unless File.file?(path)
-        return record_at(path, id, directory)
+        return record_at(path, kind, source_id, directory)
       end
       nil
-    rescue ex : JSON::ParseException
-      raise Error.new("inbox record is corrupt: #{id}.json")
     end
 
-    private def record_at(path : String, id : String, directory : String) : SpoolRecord
-      record = SpoolRecord.from_json(File.read(path))
-      unless record.local_id == id
-        raise Error.new("inbox record id does not match requested id")
-      end
-      verify_record!(record)
+    private def record_at(path : String, kind : String, source_id : String,
+                          directory : String) : SpoolRecord
+      record = validate_record_bytes(kind, source_id, File.read(path))
       hydrate_state!(record, directory)
       record
-    rescue ex : JSON::ParseException
-      raise Error.new("inbox record is corrupt: #{id}.json")
     end
 
     private def hydrate_state!(record : SpoolRecord, directory : String) : Nil
@@ -311,6 +318,19 @@ module Tinrelay
     end
 
     private def verify_record!(record : SpoolRecord) : Nil
+      unless record.format == 2
+        raise Error.new("unsupported inbox record format")
+      end
+      validate_identity!(record.kind, record.source_id)
+      if record.is_a?(HailSpoolRecord) && record.source_id != record.hail_id
+        raise Error.new("inbox hail identity differs from its signed hail")
+      end
+      if record.is_a?(RejectedTransmissionSpoolRecord)
+        expected = RejectionEvidence.id(record.transmission_id, record.rejection_reason)
+        unless record.source_id == expected
+          raise Error.new("inbox rejection evidence identity is invalid")
+        end
+      end
       return unless record.is_a?(TransmissionSpoolRecord)
       transmission = record.signed_transmission
       certificate = record.sender_radio_certificate
@@ -358,7 +378,7 @@ module Tinrelay
              )
         raise Error.new("inbox signed transmission verification failed")
       end
-      unless record.relay_transmission_id == transmission.transmission_id &&
+      unless record.source_id == transmission.transmission_id &&
              record.sender_ship == transmission.sender_ship &&
              record.recipient_ship == transmission.recipient_ship &&
              record.to_label == transmission.to_label &&
@@ -367,15 +387,27 @@ module Tinrelay
       end
     end
 
-    private def derived_local_id(kind : String, source_id : String) : String
-      digest = Digest::SHA256.hexdigest(
-        Canonical.fields("tinrelay-local-evidence-v1", kind, source_id)
-      )
-      "tr_#{digest[0, 32]}"
+    private def record_path(directory : String, kind : String,
+                            source_id : String) : String
+      File.join(directory, kind, "#{source_id}.json")
     end
 
-    private def validate_id!(id : String) : Nil
-      raise Invalid.new("invalid local inbox id") unless LOCAL_ID.matches?(id)
+    private def ensure_current_layout!(directory : String) : Nil
+      return unless Dir.exists?(directory)
+      return unless Dir.children(directory).any? do |name|
+                      name.ends_with?(".json") && File.file?(File.join(directory, name))
+                    end
+      raise Invalid.new("local inbox format requires `tinrelay migrate`")
+    end
+
+    private def validate_identity!(kind : String, source_id : String) : Nil
+      raise Invalid.new("invalid inbox evidence kind") unless KINDS.includes?(kind)
+      valid = if kind == "rejected_transmission"
+                RejectionEvidence::ID.matches?(source_id)
+              else
+                Outbox::UUID.matches?(source_id)
+              end
+      raise Invalid.new("invalid inbox source id") unless valid
     end
   end
 end

@@ -21,7 +21,7 @@ describe "the complete TinRelay ship-to-ship vertical" do
       })
       event = alpha.radio_wait(alpha_spool, hold_seconds: 0)
       event.kind.should eq("transmission")
-      event.local_id.should match(/\Atr_[0-9a-f]{32}\z/)
+      event.source_id.should eq(first.transmission_id)
       event_json = JSON.parse(event.to_json).as_h
       event_json["name"].as_s.should eq("steward")
       event_json.has_key?("route").should be_false
@@ -30,16 +30,16 @@ describe "the complete TinRelay ship-to-ship vertical" do
         .should eq("steward-task")
       event.wrapper.should eq(
         "TINRELAY LOCAL POINTER\n" + {
-          contract:        "tinrelay-local-pointer-v1",
+          contract:        "tinrelay-local-pointer-v2",
           kind:            "transmission",
-          local_id:        event.local_id,
+          transmission_id: event.source_id,
           local_ship:      "alpha",
           sender_ship:     "beta",
           attention_label: "steward",
         }.to_json
       )
 
-      record = alpha_spool.get(event.local_id)
+      record = alpha_spool.get(event.kind, event.source_id)
         .as(Tinrelay::TransmissionSpoolRecord)
       record_json = JSON.parse(record.to_json).as_h
       record_json.has_key?("route").should be_false
@@ -50,7 +50,7 @@ describe "the complete TinRelay ship-to-ship vertical" do
         "SELECT state, ciphertext IS NULL, signature IS NULL FROM transmissions WHERE id = ?",
         first.transmission_id, as: {String, Int64, Int64}
       ).should eq({"collected", 1_i64, 1_i64})
-      alpha_spool.routed(event.local_id)
+      alpha_spool.routed(event.kind, event.source_id)
 
       # The sender sees only generic acceptance after internal payload erasure.
       response = beta.remote.post("/v1/transmissions", first.to_json)
@@ -94,15 +94,15 @@ describe "the complete TinRelay ship-to-ship vertical" do
       )
 
       recovered = alpha.radio_wait(spool, hold_seconds: 0)
-      recovered.local_id.should eq(before_crash.local_id)
+      recovered.source_id.should eq(before_crash.source_id)
       replayed = alpha.radio_wait(spool, hold_seconds: 0)
-      replayed.local_id.should eq(before_crash.local_id)
-      routed = spool.routed(recovered.local_id)
+      replayed.source_id.should eq(before_crash.source_id)
+      routed = spool.routed(recovered.kind, recovered.source_id)
       routed.routed.should be_true
       spool.next_unrouted.should be_nil
       spool.list.count do |item|
         item.is_a?(Tinrelay::TransmissionSpoolRecord) &&
-          item.relay_transmission_id == sent.transmission_id
+          item.transmission_id == sent.transmission_id
       end.should eq(1)
     end
   end

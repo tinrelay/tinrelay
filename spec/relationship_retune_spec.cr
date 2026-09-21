@@ -15,7 +15,7 @@ describe "relationship closure and finite radio retune" do
         )
         peer.send("steward@alpha", "establish #{ship}")
         event = alpha.radio_wait(spool, hold_seconds: 0)
-        spool.routed(event.local_id)
+        spool.routed(event.kind, event.source_id)
         peers[ship] = peer
       end
 
@@ -58,7 +58,7 @@ describe "relationship closure and finite radio retune" do
       alpha.send("steward@gamma", "retune checkpoint")
       gamma_event = TinrelaySpec.receive(gamma_events)
       gamma_event.kind.should eq("transmission")
-      gamma_spool.routed(gamma_event.local_id)
+      gamma_spool.routed(gamma_event.kind, gamma_event.source_id)
       peers["gamma"].keyring.data.contact!("alpha")
         .radio_certificate.generation.should eq(2)
       peers["gamma"].keyring.data.contact!("alpha")
@@ -103,10 +103,10 @@ describe "relationship closure and finite radio retune" do
         as: String
       ).should be_nil
 
-      relay_hail_id = delta_spool.get(delta_event.local_id)
+      relay_hail_id = delta_spool.get(delta_event.kind, delta_event.source_id)
         .as(Tinrelay::HailSpoolRecord).hail_id
       relay_hail_id.should eq(hail.hail_id)
-      peers["delta"].allow_contact(delta_event.local_id, delta_spool)
+      peers["delta"].allow_contact(delta_event.source_id, delta_spool)
       api.database.db.query_one(
         "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'delta'",
         as: String
@@ -118,9 +118,9 @@ describe "relationship closure and finite radio retune" do
       valid = peers["gamma"].send("steward@alpha", "still connected")
       delivered = alpha.radio_wait(spool, hold_seconds: 0)
       delivered.kind.should eq("transmission")
-      spool.get(delivered.local_id).as(Tinrelay::TransmissionSpoolRecord)
-        .relay_transmission_id.should eq(valid.transmission_id)
-      spool.routed(delivered.local_id)
+      spool.get(delivered.kind, delivered.source_id).as(Tinrelay::TransmissionSpoolRecord)
+        .transmission_id.should eq(valid.transmission_id)
+      spool.routed(delivered.kind, delivered.source_id)
       alpha.radio_poll(spool).should be_nil
       spool.list.any? do |record|
         record.is_a?(Tinrelay::HailSpoolRecord) &&

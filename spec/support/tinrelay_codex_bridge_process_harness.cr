@@ -55,12 +55,17 @@ module TinrelayCodexBridgeProcessSpec
   end
 
   def self.event(number = 1, kind = "transmission", name : String? = "operator")
+    source_id = if kind == "rejected_transmission"
+                  "tr_#{number.to_s(16).rjust(32, '0')}"
+                else
+                  "00000000-0000-4000-8000-#{number.to_s(16).rjust(12, '0')}"
+                end
     {
-      contract: "tinrelay-radio-wait-v1",
-      local_id: "tr_#{number.to_s(16).rjust(32, '0')}",
-      kind:     kind,
-      name:     name,
-      wrapper:  "TINRELAY LOCAL POINTER #{number}\nexact body-free wrapper",
+      contract:  "tinrelay-radio-wait-v2",
+      source_id: source_id,
+      kind:      kind,
+      name:      name,
+      wrapper:   "TINRELAY LOCAL POINTER #{number}\nexact body-free wrapper",
     }
   end
 
@@ -154,10 +159,10 @@ module TinrelayCodexBridgeProcessSpec
     def add_inbox_record(event, body = "Exact message text.\nSecond line.",
                          received_at = 1_789_605_582_i64)
       config["inbox_records"] = JSON.parse({
-        event[:local_id] => {
-          contract:            "tinrelay-inspected-inbox-v1",
+        event[:source_id] => {
+          contract:            "tinrelay-inspected-inbox-v2",
           kind:                "transmission",
-          local_id:            event[:local_id],
+          transmission_id:     event[:source_id],
           received_at:         received_at,
           state:               "pending",
           sender_ship:         "remote",

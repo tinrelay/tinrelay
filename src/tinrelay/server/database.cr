@@ -4,6 +4,7 @@ module Tinrelay
       {1, {{ read_file("sql/migrations/001_initial.sql") }}},
       {2, {{ read_file("sql/migrations/002_registration_events.sql") }}},
       {3, {{ read_file("sql/migrations/003_pending_ciphertext_bytes.sql") }}},
+      {4, {{ read_file("sql/migrations/004_withdrawn_transmissions.sql") }}},
     ]
 
     getter db : DB::Database

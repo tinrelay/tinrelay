@@ -5,6 +5,7 @@ module Tinrelay
     ]
     TRANSMISSION_OUTCOMES      = %w[direct queued acknowledged expired rejected]
     TRANSMISSION_BYTE_OUTCOMES = %w[direct queued]
+    WITHDRAWAL_OUTCOMES        = %w[requested changed]
     HAIL_OUTCOMES              = %w[accepted collected allowed expired rejected]
     RADIO_WAIT_OUTCOMES        = %w[transmission hail contact_update timeout disconnect error]
     RELOAD_OUTCOMES            = %w[accepted rejected]
@@ -35,6 +36,10 @@ module Tinrelay
 
     def transmission_bytes(outcome : String, count : Int64) : Nil
       increment(:transmission_bytes, outcome, TRANSMISSION_BYTE_OUTCOMES, count)
+    end
+
+    def withdrawal(outcome : String, count = 1_i64) : Nil
+      increment(:withdrawal, outcome, WITHDRAWAL_OUTCOMES, count)
     end
 
     def acknowledgement_latency(seconds : Int64) : Nil
@@ -138,6 +143,10 @@ module Tinrelay
         counter_family(
           io, process[:counters], :transmission_bytes,
           "tinrelay_transmission_ciphertext_bytes_total", TRANSMISSION_BYTE_OUTCOMES
+        )
+        counter_family(
+          io, process[:counters], :withdrawal,
+          "tinrelay_transmission_withdrawals_total", WITHDRAWAL_OUTCOMES
         )
         acknowledgement_latency(io, process)
         counter_family(

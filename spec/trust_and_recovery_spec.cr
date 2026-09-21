@@ -288,7 +288,7 @@ describe "trust and recovery transitions" do
 
       event = receiver.radio_wait(spool, hold_seconds: 0)
       event.kind.should eq("transmission")
-      record = spool.get(event.local_id).as(Tinrelay::TransmissionSpoolRecord)
+      record = spool.get(event.kind, event.source_id).as(Tinrelay::TransmissionSpoolRecord)
       record.signed_transmission.body.should eq("pinned identity survives registry substitution")
     end
   end
@@ -302,17 +302,24 @@ describe "trust and recovery transitions" do
       )
 
       [nil, api.store].each_with_index do |accepted_store, index|
-        transmission_box = Tinrelay::Outbox.new(File.join(root, "tx-outbox-#{index}"))
+        transmission_box = Tinrelay::OutgoingStore.new(
+          File.join(root, "outgoing-#{index}"), "beta"
+        )
         unreliable = Tinrelay::Client.new(
           beta.keyring,
           UnavailableSubmissionRemote.new(origin, accepted_store)
         )
         failure = expect_raises(Tinrelay::AcceptanceUnknown) do
-          unreliable.send("steward@alpha", "ambiguous #{index}", outbox: transmission_box)
+          unreliable.send(
+            "steward@alpha", "ambiguous #{index}", outgoing: transmission_box
+          )
         end
-        transmission_box.list.map(&.transmission_id).should eq([failure.transmission_id])
+        transmission_box.list_outbox.map(&.transmission_id)
+          .should eq([failure.transmission_id])
         beta.retry(transmission_box, failure.transmission_id)
-        transmission_box.list.should be_empty
+        transmission_box.list_outbox.should be_empty
+        transmission_box.sent(failure.transmission_id).transmission_id
+          .should eq(failure.transmission_id)
       end
     end
   end
@@ -356,7 +363,7 @@ describe "trust and recovery transitions" do
         )
         peer.send("steward@alpha", "establish #{ship}")
         event = alpha.radio_wait(spool, hold_seconds: 0)
-        spool.routed(event.local_id)
+        spool.routed(event.kind, event.source_id)
       end
 
       before_acceptance = AmbiguousRelationshipRemote.new(origin)
@@ -551,9 +558,9 @@ describe "trust and recovery transitions" do
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
       first_event = receiver.radio_wait(spool, hold_seconds: 0)
-      spool.routed(first_event.local_id)
+      spool.routed(first_event.kind, first_event.source_id)
       next_event = receiver.radio_wait(spool, hold_seconds: 0)
-      spool.get(next_event.local_id).as(Tinrelay::TransmissionSpoolRecord)
+      spool.get(next_event.kind, next_event.source_id).as(Tinrelay::TransmissionSpoolRecord)
         .signed_transmission.body
         .should eq("later valid traffic")
       remote.acknowledgements.should eq([

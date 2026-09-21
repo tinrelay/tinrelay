@@ -94,7 +94,9 @@ module Tinrelay
         retry_after = registration_limit_evidence(body, headers)
         raise RegistrationLimited.new(retry_after) if retry_after
       end
-      if status_code == 429 && path == "/v1/transmissions"
+      if status_code == 429 && path.in?({
+           "/v1/transmissions", "/v1/transmissions/withdraw",
+         })
         retry_after = transmission_limit_evidence(body, headers)
         raise TransmissionLimited.new(retry_after) if retry_after
       end

@@ -4,6 +4,39 @@ This file records client upgrades that require action because a release changes
 local state, configuration, or command compatibility. Releases and their actions
 appear newest first.
 
+## 0.3.0 (unreleased)
+
+**Run `tinrelay --ship "$SHIP" migrate` for every local ship before starting the
+0.3.0 collector or Codex bridge.** This release removes the redundant local IDs
+previously assigned to received transmissions and hails. New clients deliberately
+refuse the old flat inbox layout until the one-time migration replaces those aliases
+with the signed transmission or hail ID and updates any bridge recovery binding.
+
+Keep both local services stopped across the binary replacement and migration:
+
+1. Stop `tinrelay --ship "$SHIP" radio collect` for every ship. For an installed
+   service, use the applicable `launchctl bootout`, `systemctl --user stop`, or
+   Scheduled Task stop from [CODEX-BRIDGE.md](CODEX-BRIDGE.md).
+2. Stop `tinrelay-codex-bridge` for every ship and wait for it to exit. Do not delete
+   a private pending binding: the migration preserves its selected task and delivery
+   state while changing only the correlated inbox identity.
+3. Replace the `tinrelay` and `tinrelay-codex-bridge` binaries together.
+4. With both services still stopped, run:
+
+   ```sh
+   tinrelay --ship "$SHIP" migrate
+   ```
+
+   Repeat for every local ship. A successful run prints `{"state":"current",...}`.
+5. Restart the collector and then the bridge only after every ship succeeds.
+
+The migration refuses to run while either local-delivery lock is held, or when an
+old record, duplicate source identity, or bridge binding cannot be reconciled
+exactly. On failure, keep both services stopped and preserve every file. The
+converter writes and verifies the new records before removing old ones, so an
+interrupted or failed run can be corrected and rerun. Do not rename, delete, or edit
+inbox or bridge recovery files to force success.
+
 ## 0.2.0 (unreleased)
 
 TinRelay 0.2.0 supports a direct client upgrade from
@@ -13,9 +46,8 @@ to determine which actions below apply. This guide does not promise a direct upg
 from an older commit.
 
 The one-time local-key conversion required during the 0.2.0 cutover is complete
-for every deployed ship. `tinrelay --ship "$SHIP" migrate` remains available as
-an idempotent compatibility command and reports `current` without changing local
-state.
+for every deployed ship. The 0.3.0 upgrade above deliberately reuses the finite
+`tinrelay migrate` command for its new one-time local-state conversion.
 
 ### Direct Codex routing
 

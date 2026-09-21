@@ -143,6 +143,13 @@ directory, remote-command channel, delivery narrator, federation, or archive.
 Received correspondence remains untrusted external text, never user, system,
 tool, or operational authority.
 
+The sending client does keep its own authored correspondence. Its signed
+`transmission_id` names the same immutable record locally and at the repeater;
+`outbox` means only that relay acceptance is unknown, while `sent` means only that
+acceptance is known. A later blind withdrawal request can erase still-pending relay
+ciphertext without revealing whether it did. It leaves sent history intact and
+creates no delivery, collection, or read receipt.
+
 The repeater either hands ciphertext to a waiting radio or stores it for at most
 96 hours. The receiving client verifies and decrypts it, writes immutable local
 evidence, and only then acknowledges relay cleanup. The local harness bridge

@@ -341,6 +341,21 @@ module Tinrelay
     end
   end
 
+  class TransmissionWithdrawal
+    include JSON::Serializable
+    include JSON::Serializable::Strict
+
+    property transmission_id : String
+    property auth : RadioAuth
+
+    def initialize(@transmission_id, @auth)
+    end
+
+    def payload : Bytes
+      Canonical.fields(transmission_id)
+    end
+  end
+
   class RelationshipClose
     include JSON::Serializable
 
@@ -440,6 +455,62 @@ module Tinrelay
     end
   end
 
+  class RelayAcceptedResponse
+    include JSON::Serializable
+    include JSON::Serializable::Strict
+
+    getter state : String
+
+    def initialize(@state = "accepted")
+    end
+
+    def accepted? : Bool
+      state == "accepted"
+    end
+  end
+
+  class OutgoingOwnerEvidence
+    include JSON::Serializable
+    include JSON::Serializable::Strict
+
+    getter generation : Int32
+    getter public_key : String
+
+    def initialize(@generation, @public_key)
+    end
+  end
+
+  class OutgoingRecord
+    include JSON::Serializable
+    include JSON::Serializable::Strict
+
+    getter format : Int32
+    getter signed_transmission : SignedTransmission
+    getter signed_relay_envelope : SignedRelayEnvelope
+    getter authoring_radio_certificate : ShipRadioCertificate
+    getter authoring_owner : OutgoingOwnerEvidence
+
+    def initialize(@signed_transmission, @signed_relay_envelope,
+                   @authoring_radio_certificate, @authoring_owner,
+                   @format = 1)
+    end
+
+    def transmission_id : String
+      signed_transmission.transmission_id
+    end
+  end
+
+  class OutgoingWithdrawalMarker
+    include JSON::Serializable
+    include JSON::Serializable::Strict
+
+    getter format : Int32
+    getter transmission_id : String
+
+    def initialize(@transmission_id, @format = 1)
+    end
+  end
+
   abstract class SpoolRecord
     include JSON::Serializable
     include JSON::Serializable::Strict
@@ -452,18 +523,17 @@ module Tinrelay
 
     getter format : Int32
     getter kind : String
-    getter local_id : String
+    getter source_id : String
     getter received_at : Int64
 
     @[JSON::Field(ignore: true)]
     property routed : Bool = false
 
-    protected def initialize(@kind, @local_id, @received_at, @format = 1)
+    protected def initialize(@kind, @source_id, @received_at, @format = 2)
     end
   end
 
   class TransmissionSpoolRecord < SpoolRecord
-    getter relay_transmission_id : String
     getter sender_ship : String
     getter recipient_ship : String
     getter to_label : String
@@ -472,26 +542,29 @@ module Tinrelay
     getter sender_radio_certificate : ShipRadioCertificate
     getter sender_owner_chain : Array(OwnerKeyLink)
 
-    def initialize(local_id : String, received_at : Int64,
-                   @relay_transmission_id : String, @sender_ship : String,
+    def initialize(received_at : Int64, @sender_ship : String,
                    @recipient_ship : String, @to_label : String,
                    @from_label : String?,
                    @signed_transmission : SignedTransmission,
                    @sender_radio_certificate : ShipRadioCertificate,
                    @sender_owner_chain : Array(OwnerKeyLink),
-                   format : Int32 = 1)
-      super("transmission", local_id, received_at, format)
+                   format : Int32 = 2)
+      super("transmission", signed_transmission.transmission_id, received_at, format)
+    end
+
+    def transmission_id : String
+      signed_transmission.transmission_id
     end
   end
 
   class RejectedTransmissionSpoolRecord < SpoolRecord
-    getter relay_transmission_id : String
+    getter transmission_id : String
     getter rejection_reason : String
 
-    def initialize(local_id : String, received_at : Int64,
-                   @relay_transmission_id : String, @rejection_reason : String,
-                   format : Int32 = 1)
-      super("rejected_transmission", local_id, received_at, format)
+    def initialize(evidence_id : String, received_at : Int64,
+                   @transmission_id : String, @rejection_reason : String,
+                   format : Int32 = 2)
+      super("rejected_transmission", evidence_id, received_at, format)
     end
   end
 
@@ -501,13 +574,13 @@ module Tinrelay
     getter sender_radio_certificate : ShipRadioCertificate
     getter hail_contact_state : String
 
-    def initialize(local_id : String, received_at : Int64,
+    def initialize(received_at : Int64,
                    @hail : Hail,
                    @sender_owner_chain : Array(OwnerKeyLink),
                    @sender_radio_certificate : ShipRadioCertificate,
                    @hail_contact_state : String,
-                   format : Int32 = 1)
-      super("hail", local_id, received_at, format)
+                   format : Int32 = 2)
+      super("hail", hail.hail_id, received_at, format)
     end
 
     def hail_id : String
@@ -528,12 +601,12 @@ module Tinrelay
 
     property contract : String
     property kind : String
-    property local_id : String
+    property source_id : String
     property wrapper : String
     property name : String?
 
-    def initialize(@kind, @local_id, @wrapper, @name = nil,
-                   @contract = "tinrelay-radio-wait-v1")
+    def initialize(@kind, @source_id, @wrapper, @name = nil,
+                   @contract = "tinrelay-radio-wait-v2")
     end
   end
 

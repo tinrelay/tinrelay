@@ -131,7 +131,7 @@ lock before starting its waiter and holds it until exit. TinRelay's spool remain
 the only durable queue.
 
 Before the first Codex submission for an event, the bridge atomically records the
-event's local ID and exact selected task in the private per-ship pending binding.
+event's kind, source identity, and exact selected task in the private per-ship binding.
 The address book cannot retarget that event after submission begins. On restart,
 the bridge checks TinRelay source status first: it clears a stale binding for an
 already-routed event without contacting Desktop; otherwise it resumes from the

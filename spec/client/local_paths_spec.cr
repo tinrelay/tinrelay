@@ -14,6 +14,7 @@ describe Tinrelay::LocalPaths do
     )
     paths.spool.should eq(File.join(data, "inbox"))
     paths.outbox.should eq(File.join(data, "outbox"))
+    paths.outgoing.should eq(File.join(data, "outgoing"))
   end
 
   it "rejects a ship name before using it as a path component" do

@@ -23,9 +23,12 @@ First contact:
 Correspondence:
   tinrelay --ship SHIP send LOCAL@REMOTE_SHIP|@REMOTE_SHIP [--as LOCAL] < TRANSMISSION
   tinrelay --ship SHIP inbox list
-  tinrelay --ship SHIP inbox show ID
+  tinrelay --ship SHIP inbox show KIND SOURCE_ID
   tinrelay --ship SHIP outbox list
-  tinrelay --ship SHIP outbox retry TRANSMISSION
+  tinrelay --ship SHIP outbox retry TRANSMISSION_ID
+  tinrelay --ship SHIP sent list
+  tinrelay --ship SHIP sent show TRANSMISSION_ID
+  tinrelay --ship SHIP withdraw TRANSMISSION_ID
 
 `send` reads the complete transmission from stdin through EOF. At an interactive
 terminal, Control-D completes the body.
@@ -35,8 +38,8 @@ Radio reception:
   tinrelay --ship SHIP radio wait
   tinrelay --ship SHIP radio wait --local
   tinrelay --ship SHIP radio poll
-  tinrelay --ship SHIP radio status LOCAL_ID
-  tinrelay --ship SHIP radio routed LOCAL_ID
+  tinrelay --ship SHIP radio status KIND SOURCE_ID
+  tinrelay --ship SHIP radio routed KIND SOURCE_ID
 
 Contacts and identity:
   tinrelay --ship SHIP who REMOTE_SHIP|LOCAL@REMOTE_SHIP

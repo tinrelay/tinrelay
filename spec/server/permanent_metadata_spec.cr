@@ -458,7 +458,7 @@ describe "permanent relay metadata capacity" do
 
       alpha.hail("beta")
       event = beta.radio_wait(spool, hold_seconds: 0)
-      hail_id = spool.get(event.local_id).as(Tinrelay::HailSpoolRecord).hail_id
+      hail_id = spool.get(event.kind, event.source_id).as(Tinrelay::HailSpoolRecord).hail_id
       request = Tinrelay::RelationshipAllow.new(
         "alpha", hail_id, Tinrelay::RadioAuth.new("beta", 1, 0_i64)
       )

@@ -36,8 +36,8 @@ module TinrelayCodexBridge
           loop do
             @control.check
             pending = @pending_target.load
-            if pending && @child.routed?(pending.local_id)
-              @pending_target.clear(pending.local_id)
+            if pending && @child.routed?(pending.kind, pending.source_id)
+              @pending_target.clear(pending.kind, pending.source_id)
               next
             end
             @reporter.emit("listening")
@@ -63,19 +63,21 @@ module TinrelayCodexBridge
     end
 
     private def deliver(event, pending : PendingTargetBinding?)
-      if pending && pending.local_id != event.id
-        unless @child.routed?(pending.local_id)
+      if pending && (pending.kind != event.kind || pending.source_id != event.id)
+        unless @child.routed?(pending.kind, pending.source_id)
           raise Blocked.new("pending_target_conflict")
         end
-        @pending_target.clear(pending.local_id)
+        @pending_target.clear(pending.kind, pending.source_id)
         pending = nil
       end
       if @child.routed?(event)
-        @pending_target.clear(event.id) if pending
+        @pending_target.clear(event.kind, event.id) if pending
         return
       end
 
-      target = pending || @pending_target.bind(event.id, @address_book.resolve(event))
+      target = pending || @pending_target.bind(
+        event.kind, event.id, @address_book.resolve(event)
+      )
       case target.state
       when DeliveryState::Delivered
         finish_delivery(event, target, "accepted_before_restart")
@@ -97,20 +99,20 @@ module TinrelayCodexBridge
           finish_delivery(event, target)
           return
         rescue ex : CodexBridge::NotReceived
-          @reporter.emit("waiting_for_recipient", ex.reason, local_id: event.id)
+          @reporter.emit("waiting_for_recipient", ex.reason, source_id: event.id)
           @control.pause(retry_seconds(Time.instant - started))
         rescue ex : CodexBridge::ReceiptUnknown
           @pending_target.replace(target, state: DeliveryState::ReceiptUnknown)
-          @reporter.emit("delivery_receipt_unknown", ex.reason, local_id: event.id)
+          @reporter.emit("delivery_receipt_unknown", ex.reason, source_id: event.id)
           raise Blocked.new("delivery_receipt_unknown")
         end
       end
     end
 
     private def finish_delivery(event, target, reason = nil)
-      @reporter.emit("accepted", reason, local_id: event.id)
+      @reporter.emit("accepted", reason, source_id: event.id)
       @child.mark_routed(event)
-      @pending_target.clear(target.local_id)
+      @pending_target.clear(target.kind, target.source_id)
     end
 
     private def retry_seconds(elapsed)

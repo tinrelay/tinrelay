@@ -164,9 +164,9 @@ describe "protocol-1 ship authorship" do
         api.store.accept(envelope)
         event = alpha.radio_wait(spool, hold_seconds: 0)
         event.kind.should eq("rejected_transmission")
-        spool.get(event.local_id)
+        spool.get(event.kind, event.source_id)
           .should be_a(Tinrelay::RejectedTransmissionSpoolRecord)
-        spool.routed(event.local_id)
+        spool.routed(event.kind, event.source_id)
       end
       spool.list.none? { |record| record.kind == "transmission" }.should be_true
     end
@@ -188,18 +188,18 @@ describe "protocol-1 ship authorship" do
       beta_established = beta.radio_wait(
         beta_spool, hold_seconds: 0
       )
-      beta_spool.routed(beta_established.local_id)
+      beta_spool.routed(beta_established.kind, beta_established.source_id)
 
       gamma = TinrelaySpec.admit_contact(
         root, origin, "gamma", alpha
       )
       gamma.send("steward@alpha", "establish gamma")
       gamma_established = alpha.radio_wait(spool, hold_seconds: 0)
-      spool.routed(gamma_established.local_id)
+      spool.routed(gamma_established.kind, gamma_established.source_id)
 
       beta.send("steward@alpha", "establish generation one", "caller")
       first = alpha.radio_wait(spool, hold_seconds: 0)
-      spool.routed(first.local_id)
+      spool.routed(first.kind, first.source_id)
 
       beta.rotate_owner.should eq(2)
       beta.close_contact("delta").should eq(2)
@@ -223,12 +223,12 @@ describe "protocol-1 ship authorship" do
       alpha.keyring.prune_retired_radios!(deadline).should be_true
       alpha.keyring.data.radios.map(&.generation).should eq([2])
 
-      record = spool.get(event.local_id).as(Tinrelay::TransmissionSpoolRecord)
+      record = spool.get(event.kind, event.source_id).as(Tinrelay::TransmissionSpoolRecord)
       record.signed_transmission.body.should eq("durable provenance")
       record.sender_radio_certificate.generation.should eq(2)
       record.sender_owner_chain.map(&.generation).should eq([1, 2])
       record.sender_owner_chain.last.public_key.should eq(beta.keyring.data.owner_public_key)
-      pattern = File.join(spool.root, "**", "#{record.local_id}.json")
+      pattern = File.join(spool.root, "**", "#{record.source_id}.json")
       local_path = Dir.glob(Path.new(pattern).to_posix).first
       local_json = File.read(local_path)
       local_json.scan("durable provenance").size.should eq(1)

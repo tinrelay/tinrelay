@@ -17,9 +17,10 @@ module Tinrelay
     property encryption : StoredKeyPair
     property certificate : ShipRadioCertificate
     property retire_after : Int64?
+    property owner_public_key : String?
 
     def initialize(@generation, @signing, @encryption, @certificate,
-                   @retire_after = nil)
+                   @retire_after = nil, @owner_public_key = nil)
     end
   end
 
@@ -347,7 +348,7 @@ module Tinrelay
           Crypto.b64(encryption_keys.public_key),
           Crypto.b64(encryption_keys.secret_key)
         ),
-        certificate
+        certificate, owner_public_key: owner.public_key
       )
       keyring = new(
         path, owner_file,
