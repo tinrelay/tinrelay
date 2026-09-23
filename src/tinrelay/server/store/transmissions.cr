@@ -27,33 +27,14 @@ module Tinrelay
       envelope_digest = Digest::SHA256.digest(envelope.signing_bytes + signature)
       stored = database.db.transaction do |transaction|
         connection = transaction.connection
-        if connection.query_one?(
-             "SELECT 1 FROM transmissions WHERE id = ?",
-             envelope.transmission_id,
-             as: Int64
-           )
-          stored_digest = connection.query_one(
-            "SELECT envelope_digest FROM transmissions WHERE id = ?",
-            envelope.transmission_id,
-            as: Bytes
-          )
-          unless Crypto.constant_time_equal?(stored_digest, envelope_digest)
-            raise Conflict.new("transmission id was reused with different contents")
-          end
-          next true
-        end
+        next true if stored_envelope?(connection, envelope.transmission_id, envelope_digest)
 
         validate_new_envelope_time!(envelope, now)
 
-        sender = authenticate_radio_signature(
+        verify_active_sender(
           connection, envelope.sender_ship, envelope.sender_signing_generation,
           envelope.signing_bytes, signature
         )
-        raise Unavailable.new("sender radio is not active") unless sender[2] == "active"
-        sender_state = connection.query_one?(
-          "SELECT state FROM ships WHERE name = ?", envelope.sender_ship, as: String
-        ) || raise Unauthorized.new("sender ship is not registered")
-        raise Unavailable.new("sender ship is not active") unless sender_state == "active"
         false
       end.not_nil!
       PreparedRelayEnvelope.new(
@@ -74,22 +55,14 @@ module Tinrelay
     end
 
     def persist(prepared : PreparedRelayEnvelope) : Bool
-      @write_mutex.synchronize do
-        database.db.transaction do |transaction|
-          connection = transaction.connection
-          if stored_digest = connection.query_one?(
-               "SELECT envelope_digest FROM transmissions WHERE id = ?",
-               prepared.envelope.transmission_id, as: Bytes
-             )
-            unless Crypto.constant_time_equal?(stored_digest, prepared.digest)
-              raise Conflict.new("transmission id was reused with different contents")
-            end
-            next true
-          end
-          next false unless delivery_allowed?(connection, prepared.envelope, true)
-          insert_transmission(connection, prepared)
-          true
-        end
+      write_transaction do |transaction|
+        connection = transaction.connection
+        next true if stored_envelope?(
+                       connection, prepared.envelope.transmission_id, prepared.digest
+                     )
+        next false unless delivery_allowed?(connection, prepared.envelope, true)
+        insert_transmission(connection, prepared)
+        true
       end.not_nil!
     end
 
@@ -106,7 +79,7 @@ module Tinrelay
         # A successful direct handoff has no relay row. Treat its later ack retry,
         # an already-cleaned fallback, and an unrelated opaque ID identically.
         if row && row[0] == request.auth.ship && row[1] == "pending"
-          erase_payload(connection, request.transmission_id, now)
+          erase_payload(connection, request.transmission_id)
           next Math.max(now - row[2], 0_i64)
         end
         nil
@@ -161,6 +134,19 @@ module Tinrelay
       Names.ship!(envelope.recipient_ship)
     end
 
+    private def stored_envelope?(connection : DB::Connection, transmission_id : String,
+                                 digest : Bytes) : Bool
+      stored_digest = connection.query_one?(
+        "SELECT envelope_digest FROM transmissions WHERE id = ?",
+        transmission_id, as: Bytes
+      )
+      return false unless stored_digest
+      unless Crypto.constant_time_equal?(stored_digest, digest)
+        raise Conflict.new("transmission id was reused with different contents")
+      end
+      true
+    end
+
     private def validate_new_envelope_time!(envelope : SignedRelayEnvelope, now : Int64) : Nil
       if envelope.created_at > now + AUTH_SKEW_SECONDS
         raise Invalid.new("transmission creation time is outside the authentication window")
@@ -192,8 +178,7 @@ module Tinrelay
       )
     end
 
-    private def erase_payload(connection : DB::Connection, transmission_id : String,
-                              now : Int64) : Nil
+    private def erase_payload(connection : DB::Connection, transmission_id : String) : Nil
       connection.exec(
         <<-SQL, transmission_id
           UPDATE transmissions

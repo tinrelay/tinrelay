@@ -2,10 +2,6 @@ module Tinrelay
   class Store
     CLEANUP_BATCH_SIZE = 256
     AUTH_SKEW_SECONDS  = 5 * 60
-    UUID               = /\A
-      [0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-
-      [89ab][0-9a-f]{3}-[0-9a-f]{12}
-    \z/x
 
     getter database : Database
     getter permanent_metadata_limit : Int64
@@ -157,11 +153,17 @@ module Tinrelay
 
     private def radio_key(connection : DB::Connection, ship : String,
                           generation : Int32) : Tuple(Bytes, Bytes, String)
+      radio_key_row(connection, ship, generation) ||
+        raise Unauthorized.new("ship radio key is not registered")
+    end
+
+    private def radio_key_row(connection : DB::Connection, ship : String,
+                              generation : Int32) : Tuple(Bytes, Bytes, String)?
       connection.query_one?(
         "SELECT signing_public_key, encryption_public_key, state " +
         "FROM ship_radio_keys WHERE ship = ? AND generation = ?",
         ship, generation, as: {Bytes, Bytes, String}
-      ) || raise Unauthorized.new("ship radio key is not registered")
+      )
     end
 
     private def owner_key(connection : DB::Connection, ship : String,
@@ -218,16 +220,25 @@ module Tinrelay
       signed_bytes : Bytes,
       signature : Bytes,
     ) : Tuple(Bytes, Bytes, String)
-      key = connection.query_one?(
-        "SELECT signing_public_key, encryption_public_key, state " +
-        "FROM ship_radio_keys WHERE ship = ? AND generation = ?",
-        ship, generation, as: {Bytes, Bytes, String}
-      )
+      key = radio_key_row(connection, ship, generation)
       verification_key = key.try(&.[0]) || dummy_signing_public_key
       unauthenticated! unless Crypto.verify(
                                 signed_bytes, signature, verification_key
                               ) && key
       key.not_nil!
+    end
+
+    private def verify_active_sender(connection : DB::Connection, ship : String,
+                                     generation : Int32, signed_bytes : Bytes,
+                                     signature : Bytes) : Nil
+      sender = authenticate_radio_signature(
+        connection, ship, generation, signed_bytes, signature
+      )
+      raise Unavailable.new("sender radio is not active") unless sender[2] == "active"
+      sender_state = connection.query_one?(
+        "SELECT state FROM ships WHERE name = ?", ship, as: String
+      ) || raise Unauthorized.new("sender ship is not registered")
+      raise Unavailable.new("sender ship is not active") unless sender_state == "active"
     end
 
     private def decode_auth_signature(encoded : String) : Bytes
@@ -249,7 +260,7 @@ module Tinrelay
     end
 
     private def require_uuid!(value : String, label : String) : Nil
-      raise Invalid.new("invalid #{label}") unless UUID.matches?(value)
+      raise Invalid.new("invalid #{label}") unless Ids::PROTOCOL_UUID.matches?(value)
     end
   end
 end

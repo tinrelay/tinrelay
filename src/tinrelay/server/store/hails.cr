@@ -19,15 +19,10 @@ module Tinrelay
       signature = Crypto.unb64(hail.signature, "hail signature")
       database.db.transaction do |transaction|
         connection = transaction.connection
-        sender = authenticate_radio_signature(
+        verify_active_sender(
           connection, hail.sender_ship, hail.sender_signing_generation,
           hail.signing_bytes, signature
         )
-        raise Unavailable.new("sender radio is not active") unless sender[2] == "active"
-        sender_state = connection.query_one?(
-          "SELECT state FROM ships WHERE name = ?", hail.sender_ship, as: String
-        ) || raise Unauthorized.new("sender ship is not registered")
-        raise Unavailable.new("sender ship is not active") unless sender_state == "active"
       end
       hail
     end
@@ -35,17 +30,16 @@ module Tinrelay
     def persist_hail(hail : Hail,
                      now : Int64 = Time.utc.to_unix) : Bool
       signature = Crypto.unb64(hail.signature, "hail signature")
-      @write_mutex.synchronize do
-        database.db.transaction do |transaction|
-          connection = transaction.connection
-          active = connection.query_one?(
-            "SELECT 1 FROM ships WHERE name = ? AND state = 'active'",
-            hail.recipient_ship, as: Int64
-          )
-          next false unless active
-          ship_a, ship_b = relationship_pair(hail.sender_ship, hail.recipient_ship)
-          relationship = connection.query_one?(
-            <<-SQL, ship_a, ship_b, hail.sender_ship, hail.recipient_ship, hail.created_at,
+      write_transaction do |transaction|
+        connection = transaction.connection
+        active = connection.query_one?(
+          "SELECT 1 FROM ships WHERE name = ? AND state = 'active'",
+          hail.recipient_ship, as: Int64
+        )
+        next false unless active
+        ship_a, ship_b = relationship_pair(hail.sender_ship, hail.recipient_ship)
+        relationship = connection.query_one?(
+          <<-SQL, ship_a, ship_b, hail.sender_ship, hail.recipient_ship, hail.created_at,
               SELECT 1
                 FROM relationships
                WHERE ship_a = ? AND ship_b = ? AND state = 'active'
@@ -56,27 +50,26 @@ module Tinrelay
                       AND expires_at > ?
                  )
             SQL
-            as: Int64
-          )
-          next false if relationship
-          pending = connection.scalar(
-            "SELECT COUNT(*) FROM hails " +
-            "WHERE recipient_ship = ? AND allowed_at IS NULL AND expires_at > ?",
-            hail.recipient_ship, now
-          ).as(Int64)
-          next false if pending >= MAX_UNALLOWED_HAILS_PER_SHIP
-          sql = <<-SQL
+          as: Int64
+        )
+        next false if relationship
+        pending = connection.scalar(
+          "SELECT COUNT(*) FROM hails " +
+          "WHERE recipient_ship = ? AND allowed_at IS NULL AND expires_at > ?",
+          hail.recipient_ship, now
+        ).as(Int64)
+        next false if pending >= MAX_UNALLOWED_HAILS_PER_SHIP
+        sql = <<-SQL
               INSERT OR IGNORE INTO hails(
                 id, sender_ship, sender_signing_generation, recipient_ship,
                 created_at, expires_at, signature
               ) VALUES (?, ?, ?, ?, ?, ?, ?)
             SQL
-          connection.exec(
-            sql, hail.hail_id, hail.sender_ship,
-            hail.sender_signing_generation, hail.recipient_ship,
-            hail.created_at, hail.expires_at, signature
-          ).rows_affected == 1
-        end
+        connection.exec(
+          sql, hail.hail_id, hail.sender_ship,
+          hail.sender_signing_generation, hail.recipient_ship,
+          hail.created_at, hail.expires_at, signature
+        ).rows_affected == 1
       end.not_nil!
     end
 

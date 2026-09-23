@@ -234,12 +234,8 @@ module Tinrelay
     def self.load(explicit_path : String?, allow_missing_default = true) : self?
       path = explicit_path || DEFAULT_PATH
       bytes = File.open(path) do |file|
-        buffer = IO::Memory.new
-        count = IO.copy(file, buffer, MAX_BYTES + 1)
-        if count > MAX_BYTES
+        BoundedIO.read(file, MAX_BYTES) ||
           raise Invalid.new("tinrelayd configuration exceeds #{MAX_BYTES} bytes")
-        end
-        buffer.to_s
       end
       from_json(bytes)
     rescue File::NotFoundError

@@ -7,52 +7,47 @@ module Tinrelay
     def rotate_owner(rotation : OwnerRotation,
                      now : Int64 = Time.utc.to_unix,
                      exempt_from_rotation_limit : Bool = false) : Nil
-      @write_mutex.synchronize do
-        database.db.transaction do |transaction|
-          connection = transaction.connection
-          verify_owner_action(
-            connection, rotation.auth, "owner.rotate", rotation.payload, now
+      write_transaction do |transaction|
+        connection = transaction.connection
+        verify_owner_action(
+          connection, rotation.auth, "owner.rotate", rotation.payload, now
+        )
+        unless rotation.new_generation == rotation.auth.owner_generation + 1
+          raise Invalid.new("owner generation must advance by one")
+        end
+        new_key = decode_owner_public_key(rotation.new_public_key)
+        old_key = owner_key(
+          connection, rotation.auth.ship, rotation.auth.owner_generation
+        )
+        bytes = OwnerKeyLink.rotation_bytes(
+          rotation.auth.ship, rotation.new_generation, rotation.new_public_key
+        )
+        unless Crypto.verify(bytes, Crypto.unb64(rotation.prior_signature), old_key)
+          raise Unauthorized.new("owner rotation lacks the prior owner signature")
+        end
+        prior_signature = Crypto.unb64(rotation.prior_signature)
+        unless exempt_from_rotation_limit
+          enforce_rotation_budget!(
+            connection, rotation.auth.ship, "ship_owner_keys",
+            MAX_OWNER_ROTATIONS_PER_DAY, now
           )
-          unless rotation.new_generation == rotation.auth.owner_generation + 1
-            raise Invalid.new("owner generation must advance by one")
-          end
-          new_key = decode_owner_public_key(rotation.new_public_key)
-          old_key = owner_key(
-            connection, rotation.auth.ship, rotation.auth.owner_generation
-          )
-          bytes = Canonical.fields(
-            "tinrelay-owner-rotation-v1",
-            rotation.auth.ship,
-            rotation.new_generation.to_s,
-            rotation.new_public_key
-          )
-          unless Crypto.verify(bytes, Crypto.unb64(rotation.prior_signature), old_key)
-            raise Unauthorized.new("owner rotation lacks the prior owner signature")
-          end
-          prior_signature = Crypto.unb64(rotation.prior_signature)
-          unless exempt_from_rotation_limit
-            enforce_rotation_budget!(
-              connection, rotation.auth.ship, "ship_owner_keys",
-              MAX_OWNER_ROTATIONS_PER_DAY, now
-            )
-          end
-          ensure_permanent_capacity!(connection, 1)
-          connection.exec(
-            "UPDATE ship_owner_keys SET state = 'rotated', revoked_at = ? " +
-            "WHERE ship = ? AND state = 'active'",
-            now,
-            rotation.auth.ship
-          )
-          connection.exec(
-            <<-SQL, rotation.auth.ship, rotation.new_generation, new_key, now, prior_signature
+        end
+        ensure_permanent_capacity!(connection, 1)
+        connection.exec(
+          "UPDATE ship_owner_keys SET state = 'rotated', revoked_at = ? " +
+          "WHERE ship = ? AND state = 'active'",
+          now,
+          rotation.auth.ship
+        )
+        connection.exec(
+          <<-SQL, rotation.auth.ship, rotation.new_generation, new_key, now, prior_signature
               INSERT INTO ship_owner_keys(
                 ship, generation, public_key, state, valid_from,
                 authorization_signature
               ) VALUES (?, ?, ?, 'active', ?, ?)
             SQL
-          )
-          advance_admin(connection, rotation.auth)
-        end
+        )
+        advance_admin(connection, rotation.auth)
       end
     end
 
@@ -182,11 +177,7 @@ module Tinrelay
     private def verify_radio_certificate(connection : DB::Connection,
                                          certificate : ShipRadioCertificate) : Nil
       owner = owner_key(connection, certificate.ship, certificate.owner_generation)
-      unless Crypto.verify(
-               certificate.unsigned_bytes,
-               Crypto.unb64(certificate.owner_signature),
-               owner
-             )
+      unless certificate.owner_authorized?(owner)
         raise Unauthorized.new("radio certificate is not owner-authorized")
       end
     end

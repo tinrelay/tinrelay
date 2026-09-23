@@ -2,6 +2,7 @@ require "http/server"
 require "sqlite3"
 
 require "../protocol"
+require "../bounded_io"
 require "./database"
 require "./store"
 require "./store/registration"

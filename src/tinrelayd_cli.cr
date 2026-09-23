@@ -1,7 +1,10 @@
 require "./tinrelay/server/server"
+require "./tinrelay/cli_arguments"
 
 module Tinrelay
   module ServerCLI
+    extend CLIArguments
+
     def self.run(argv : Array(String)) : Nil
       command = argv.shift? || "help"
       case command
@@ -75,18 +78,7 @@ module Tinrelay
       spawn do
         loop do
           reload_requests.receive
-          begin
-            api.reload_configuration
-            api.metrics.configuration_reload("accepted")
-            STDERR.puts({event: "configuration_reloaded"}.to_json)
-          rescue ex
-            api.metrics.configuration_reload("rejected")
-            STDERR.puts({
-              event:   "configuration_reload_failed",
-              error:   ex.class.name,
-              message: bounded_message(ex),
-            }.to_json)
-          end
+          reload_once(api)
         end
       end
       spawn do
@@ -94,20 +86,7 @@ module Tinrelay
         loop do
           sleep cleanup_delay
           break if stopping
-          result = api.store.cleanup
-          api.metrics.cleanup(result)
-          if result.values.any?(&.> 0)
-            STDERR.puts({
-              event:   "cleanup",
-              expired: result[:expired],
-              deleted: result[:deleted],
-            }.to_json)
-          end
-          cleanup_delay = if result[:deleted] == Store::CLEANUP_BATCH_SIZE
-                            1.second
-                          else
-                            60.seconds
-                          end
+          cleanup_delay = cleanup_once(api)
         rescue ex
           api.metrics.cleanup_error
           STDERR.puts({event: "cleanup_failed", error: ex.class.name}.to_json)
@@ -126,16 +105,30 @@ module Tinrelay
       STDERR.puts({event: "stopped"}.to_json)
     end
 
-    private def self.extract(argv : Array(String), name : String) : String?
-      index = argv.index(name)
-      return nil unless index
-      raise Invalid.new("#{name} requires a value") unless index + 1 < argv.size
-      argv.delete_at(index)
-      argv.delete_at(index)
+    private def self.reload_once(api : API) : Nil
+      api.reload_configuration
+      api.metrics.configuration_reload("accepted")
+      STDERR.puts({event: "configuration_reloaded"}.to_json)
+    rescue ex
+      api.metrics.configuration_reload("rejected")
+      STDERR.puts({
+        event:   "configuration_reload_failed",
+        error:   ex.class.name,
+        message: bounded_message(ex),
+      }.to_json)
     end
 
-    private def self.required(argv, name) : String
-      extract(argv, name) || raise Invalid.new("#{name} is required")
+    private def self.cleanup_once(api : API) : Time::Span
+      result = api.store.cleanup
+      api.metrics.cleanup(result)
+      if result.values.any?(&.> 0)
+        STDERR.puts({
+          event:   "cleanup",
+          expired: result[:expired],
+          deleted: result[:deleted],
+        }.to_json)
+      end
+      result[:deleted] == Store::CLEANUP_BATCH_SIZE ? 1.second : 60.seconds
     end
 
     private def self.numeric(value : String?, name : String,
@@ -147,10 +140,6 @@ module Tinrelay
     private def self.bounded_message(error : Exception) : String
       message = error.message || "configuration reload failed"
       message.size > 240 ? "#{message[0, 240]}…" : message
-    end
-
-    private def self.no_extra!(argv) : Nil
-      raise Invalid.new("unexpected arguments: #{argv.join(' ')}") unless argv.empty?
     end
 
     HELP = {{ read_file("templates/tinrelayd-help.txt") }}

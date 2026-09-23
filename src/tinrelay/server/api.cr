@@ -149,7 +149,7 @@ module Tinrelay
           if runtime_snapshot.request_logging?
             STDERR.puts({
               event: "request", request_id: request_id(context), method: context.request.method,
-              path: safe_log_path(context.request.path), status: status,
+              path: context.request.path, status: status,
               duration_ms: (Time.instant - started).total_milliseconds.round.to_i,
             }.to_json)
           end
@@ -192,19 +192,7 @@ module Tinrelay
       when {"POST", "/v1/radio/wait"}
         radio_wait(context)
       when {"POST", "/v1/transmissions/ack"}
-        acknowledgement = parse_body(context, TransmissionAck)
-        latency = if prepared = handoffs.prepared_for_ack(
-                       acknowledgement.transmission_id, acknowledgement.auth.ship
-                     )
-                    store.verify_ack(acknowledgement)
-                    handoffs.complete(acknowledgement.transmission_id)
-                    Math.max(Time.utc.to_unix - prepared.accepted_at, 0_i64)
-                  else
-                    store.acknowledge(acknowledgement)
-                  end
-        metrics.transmission("acknowledged")
-        latency.try { |seconds| metrics.acknowledgement_latency(seconds) }
-        json(context, 200, %({"state":"acknowledged"}))
+        acknowledge_transmission(context)
       when {"POST", "/v1/hails/ack"}
         store.acknowledge_hail(parse_body(context, HailAck))
         metrics.hail("collected")
@@ -242,6 +230,22 @@ module Tinrelay
       else
         error(context, 404, "not_found", "API route not found")
       end
+    end
+
+    private def acknowledge_transmission(context : HTTP::Server::Context) : Int32
+      acknowledgement = parse_body(context, TransmissionAck)
+      latency = if prepared = handoffs.prepared_for_ack(
+                     acknowledgement.transmission_id, acknowledgement.auth.ship
+                   )
+                  store.verify_ack(acknowledgement)
+                  handoffs.complete(acknowledgement.transmission_id)
+                  Math.max(Time.utc.to_unix - prepared.accepted_at, 0_i64)
+                else
+                  store.acknowledge(acknowledgement)
+                end
+      metrics.transmission("acknowledged")
+      latency.try { |seconds| metrics.acknowledgement_latency(seconds) }
+      json(context, 200, %({"state":"acknowledged"}))
     end
 
     private def claim_ship(context : HTTP::Server::Context) : Int32
@@ -325,15 +329,7 @@ module Tinrelay
       counted = false
       envelope = parse_body(context, SignedRelayEnvelope)
       prepared = store.prepare(envelope)
-      snapshot = runtime_snapshot
-      unless snapshot.rate_limit_excluded?(envelope.sender_ship)
-        source = snapshot.source_bucket(
-          context.request.remote_address, context.request.headers
-        )
-        if retry_after = transmission_buckets.admit(source, prepared.ciphertext.size)
-          raise TransmissionLimited.new(retry_after.to_i64)
-        end
-      end
+      charge_transmission!(context, envelope.sender_ship, prepared.ciphertext.size)
       unless prepared.stored?
         if store.deliverable?(prepared)
           remaining = acceptance_at - Time.instant
@@ -345,8 +341,7 @@ module Tinrelay
           end
         end
       end
-      remaining = acceptance_at - Time.instant
-      sleep remaining if remaining > Time::Span.zero
+      wait_for_acceptance(acceptance_at)
       metrics.transmission(outcome)
       if outcome != "rejected"
         metrics.transmission_bytes(outcome, prepared.ciphertext.size.to_i64)
@@ -360,29 +355,16 @@ module Tinrelay
 
     private def withdraw_transmission(context : HTTP::Server::Context) : Int32
       acceptance_at = Time.instant + ACCEPTANCE_TARGET
-      content_length = context.request.headers["Content-Length"]?.try(&.to_i64?)
-      if content_length && content_length > MAX_REQUEST_BYTES
-        raise Invalid.new("request body exceeds #{MAX_REQUEST_BYTES} bytes")
-      end
-      body = read_limited(context.request.body)
+      body = read_request_body(context)
       withdrawal = TransmissionWithdrawal.from_json(body)
       store.verify_withdrawal(withdrawal)
       metrics.withdrawal("requested")
 
-      snapshot = runtime_snapshot
-      unless snapshot.rate_limit_excluded?(withdrawal.auth.ship)
-        source = snapshot.source_bucket(
-          context.request.remote_address, context.request.headers
-        )
-        if retry_after = transmission_buckets.admit(source, body.bytesize)
-          raise TransmissionLimited.new(retry_after.to_i64)
-        end
-      end
+      charge_transmission!(context, withdrawal.auth.ship, body.bytesize)
 
       changed = store.withdraw(withdrawal)
       metrics.withdrawal("changed") if changed
-      remaining = acceptance_at - Time.instant
-      sleep remaining if remaining > Time::Span.zero
+      wait_for_acceptance(acceptance_at)
       json(context, 202, %({"state":"accepted"}))
     end
 
@@ -399,8 +381,7 @@ module Tinrelay
           outcome = "accepted"
         end
       end
-      remaining = acceptance_at - Time.instant
-      sleep remaining if remaining > Time::Span.zero
+      wait_for_acceptance(acceptance_at)
       metrics.hail(outcome)
       counted = true
       json(context, 202, %({"state":"accepted"}))
@@ -490,29 +471,38 @@ module Tinrelay
     end
 
     private def parse_body(context, type : T.class) : T forall T
+      type.from_json(read_request_body(context))
+    end
+
+    private def read_request_body(context : HTTP::Server::Context) : String
       content_length = context.request.headers["Content-Length"]?.try(&.to_i64?)
       if content_length && content_length > MAX_REQUEST_BYTES
         raise Invalid.new("request body exceeds #{MAX_REQUEST_BYTES} bytes")
       end
-      body = read_limited(context.request.body)
-      type.from_json(body)
+      read_limited(context.request.body)
+    end
+
+    private def charge_transmission!(context : HTTP::Server::Context,
+                                     ship : String, bytes : Int32) : Nil
+      snapshot = runtime_snapshot
+      return if snapshot.rate_limit_excluded?(ship)
+      source = snapshot.source_bucket(
+        context.request.remote_address, context.request.headers
+      )
+      if retry_after = transmission_buckets.admit(source, bytes)
+        raise TransmissionLimited.new(retry_after.to_i64)
+      end
+    end
+
+    private def wait_for_acceptance(acceptance_at : Time::Instant) : Nil
+      remaining = acceptance_at - Time.instant
+      sleep remaining if remaining > Time::Span.zero
     end
 
     private def read_limited(input : IO?) : String
       return "" unless input
-      output = IO::Memory.new
-      buffer = Bytes.new(8192)
-      total = 0
-      loop do
-        read = input.read(buffer)
-        break if read == 0
-        total += read
-        if total > MAX_REQUEST_BYTES
-          raise Invalid.new("request body exceeds #{MAX_REQUEST_BYTES} bytes")
-        end
-        output.write(buffer[0, read])
-      end
-      output.to_s
+      BoundedIO.read(input, MAX_REQUEST_BYTES) ||
+        raise Invalid.new("request body exceeds #{MAX_REQUEST_BYTES} bytes")
     end
 
     private def write_body(context : HTTP::Server::Context, status : Int32,
@@ -525,12 +515,8 @@ module Tinrelay
     end
 
     private def json(context, status : Int32, body : String) : Int32
-      context.response.status_code = status
-      context.response.content_type = "application/json; charset=utf-8"
       context.response.headers["Cache-Control"] = "no-store"
-      context.response.content_length = body.bytesize
-      context.response.print(body) unless context.request.method == "HEAD"
-      status
+      write_body(context, status, "application/json; charset=utf-8", body)
     end
 
     private def error(context, status : Int32, code : String, message : String) : Int32
@@ -539,10 +525,6 @@ module Tinrelay
 
     private def request_id(context) : String
       context.request.headers["X-Request-ID"]? || "local-#{Process.pid}"
-    end
-
-    private def safe_log_path(path : String) : String
-      path
     end
 
     private def load_runtime_snapshot(allow_missing_default : Bool) : RuntimeSnapshot
