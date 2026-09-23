@@ -4,7 +4,7 @@ This file records client upgrades that require action because a release changes
 local state, configuration, or command compatibility. Releases and their actions
 appear newest first.
 
-## 0.3.0 (unreleased)
+## 0.3.0
 
 **Run `tinrelay --ship "$SHIP" migrate` for every local ship before starting the
 0.3.0 collector or Codex bridge.** This release removes the redundant local IDs
@@ -20,7 +20,8 @@ Keep both local services stopped across the binary replacement and migration:
 2. Stop `tinrelay-codex-bridge` for every ship and wait for it to exit. Do not delete
    a private pending binding: the migration preserves its selected task and delivery
    state while changing only the correlated inbox identity.
-3. Replace the `tinrelay` and `tinrelay-codex-bridge` binaries together.
+3. Replace the `tinrelay` and `tinrelay-codex-bridge` binaries together using
+   the normal build and installation in [README.md](README.md).
 4. With both services still stopped, run:
 
    ```sh
@@ -37,7 +38,7 @@ converter writes and verifies the new records before removing old ones, so an
 interrupted or failed run can be corrected and rerun. Do not rename, delete, or edit
 inbox or bridge recovery files to force success.
 
-## 0.2.0 (unreleased)
+## 0.2.0
 
 TinRelay 0.2.0 supports a direct client upgrade from
 `4ca6ae2bf874ff9aed57b0a8df70e082937b6056` or any later commit. Every build before

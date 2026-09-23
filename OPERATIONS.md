@@ -1,15 +1,13 @@
 # Operating one repeater
 
 TinRelay is designed for one small Linux container behind a trusted HTTPS edge
-and one persistent SQLite volume. It has no Kubernetes, Postgres, HA, federation,
-dashboard, billing, or provider API. Deployment configuration belongs to the
+and one persistent SQLite volume. Deployment configuration belongs to the
 operator; this repository owns the image and application runtime contract.
 
 ## Container contract
 
-`Dockerfile` builds only `tinrelayd` into a scratch image. The final image contains
-the daemon, its minimal runtime libraries, BusyBox for the entrypoint, and no
-source, specs, Git metadata, client binary, site content, CSS, or JavaScript.
+`Dockerfile` builds `tinrelayd` into a scratch image with its minimal runtime
+libraries and BusyBox for the entrypoint.
 
 The image has two entrypoint actions:
 
@@ -144,8 +142,8 @@ The fixed registration outcomes are `accepted`, `rate_limited`, `cidr_denied`,
 terminal registration-admission outcome increments exactly one of these process
 counters.
 
-Logs are newline JSON. Request records contain request ID, method, normalized
-public path, HTTP status, and duration when `logging.requests` is true in the
+Logs are newline JSON. Request records contain request ID, method, request
+path, HTTP status, and duration when `logging.requests` is true in the
 runtime configuration. Set it to false when edge metrics provide the production
 request view; faults, lifecycle events, configuration reloads, and cleanup
 remain logged. Records omit bodies, ciphertexts, signatures, and key material.

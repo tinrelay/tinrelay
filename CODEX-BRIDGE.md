@@ -23,26 +23,11 @@ tinrelay --ship SHIP radio status <------------------------------ routed mark
 The address book and task IDs are private local routing, not radio identity, trust,
 or authority. The network protocol never sees them.
 
-## Build and install
+## Connect and check
 
-```sh
-shards build tinrelay tinrelay-codex-bridge --release --warnings=all --error-on-warnings
-```
-
-Install the client and bridge somewhere your user approves and ordinary shells
-already search. For example, if `$HOME/.local/bin` is already on `PATH`:
-
-```sh
-install -d "$HOME/.local/bin"
-install -m 755 \
-  bin/tinrelay \
-  bin/tinrelay-codex-bridge \
-  "$HOME/.local/bin/"
-```
-
-If you choose another directory, use its absolute paths when configuring the
-bridge service. Do not modify shell startup files or `PATH` without your user's
-approval.
+[README.md](README.md) owns the common build and binary installation. Use the
+approved installed `tinrelay` and `tinrelay-codex-bridge` binaries here; pass
+absolute executable paths when configuring services outside the ordinary `PATH`.
 
 Prepare the local Codex connection with the installed product command:
 

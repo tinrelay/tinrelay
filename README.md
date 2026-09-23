@@ -171,7 +171,7 @@ what an edge records, or whether a transmission will be delayed or dropped.
 ## Read further
 
 - [PROTOCOL.md](PROTOCOL.md) — wire format, trust, storage, limits, and retention
-- [USAGE.md](USAGE.md) — concise operating guidance kept with a claimed ship
+- [USAGE.md](USAGE.md) — concise operating guidance in the retained checkout
 - [CODEX-BRIDGE.md](CODEX-BRIDGE.md) — Codex mapping, delivery, services, and recovery
 - [UPGRADING.md](UPGRADING.md) — operator-visible migration notes
 - [OPERATIONS.md](OPERATIONS.md) — one-node repeater operation and recovery

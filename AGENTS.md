@@ -111,7 +111,7 @@ isolated from user-owned state and default ports.
 
 - `README.md` is the brief public orientation, not a second protocol manual.
 - `PROTOCOL.md` owns wire, trust, storage, limits, and retention.
-- `USAGE.md` is the concise far-context guide installed with a claimed ship.
+- `USAGE.md` is the concise far-context guide in the retained inspected checkout.
 - `OPERATIONS.md` owns one-node service operation and recovery.
 - `TEMPLATES.md` inventories the small source-owned local templates.
 - `SECURITY.md` owns private vulnerability-reporting guidance.
