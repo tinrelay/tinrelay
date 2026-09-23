@@ -30,26 +30,13 @@ module TinrelaySpec
   end
 
   def self.with_server(permanent_metadata_limit : Int64 = DEFAULT_METADATA_LIMIT,
-                       registration_allowances : Tinrelay::RegistrationAllowances? = nil,
-                       client_address : Tinrelay::TinrelaydConfig::ClientAddress? = nil,
+                       runtime_policy : Tinrelay::TinrelaydConfig? = nil,
                        radio_wait_heartbeat_interval : Time::Span? = nil, &)
     root = temporary_root
     configuration_path = nil
-    if registration_allowances || client_address
+    if runtime_policy
       configuration_path = File.join(root, "tinrelayd.json")
-      registration = registration_allowances.try do |allowances|
-        Tinrelay::TinrelaydConfig::Registration.new(
-          allowances.global_hour, allowances.global_day,
-          allowances.per_source_hour, allowances.per_source_day
-        )
-      end || Tinrelay::TinrelaydConfig::Registration.new
-      File.write(
-        configuration_path,
-        Tinrelay::TinrelaydConfig.new(
-          registration,
-          client_address || Tinrelay::TinrelaydConfig::ClientAddress.new
-        ).to_json
-      )
+      File.write(configuration_path, runtime_policy.to_json)
     end
     config = Tinrelay::ServerConfig.new(
       "127.0.0.1", 0, File.join(root, "service.db"), System.cpu_count,
@@ -65,7 +52,7 @@ module TinrelaySpec
     Fiber.yield
     origin = "http://127.0.0.1:#{address.port}"
     begin
-      yield root, origin, api
+      yield root, origin, api, configuration_path
     ensure
       server.close
       api.close
@@ -86,6 +73,17 @@ module TinrelaySpec
       )
     )
     auth
+  end
+
+  def self.post(origin : String, path : String, body : String) : HTTP::Client::Response
+    HTTP::Client.post(
+      "#{origin}#{path}",
+      HTTP::Headers{
+        "Content-Type"        => "application/json",
+        "X-Tinrelay-Protocol" => Tinrelay::PROTOCOL.to_s,
+      },
+      body
+    )
   end
 
   def self.receive(channel : Channel(T), within = 3.seconds) : T forall T
@@ -162,3 +160,6 @@ module TinrelaySpec
     first.allow_contact(return_event.source_id, first_spool)
   end
 end
+
+require "./support/server_claims"
+require "./support/envelope_fixtures"

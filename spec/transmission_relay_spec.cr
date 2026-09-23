@@ -1,18 +1,5 @@
 require "./spec_helper"
 
-class RelayCaptureRemote < Tinrelay::Remote
-  getter captured : Tinrelay::SignedRelayEnvelope?
-
-  def post(path : String, body : String) : String
-    if path == "/v1/transmissions"
-      @captured = Tinrelay::SignedRelayEnvelope.from_json(body)
-      %({"state":"accepted"})
-    else
-      super
-    end
-  end
-end
-
 class DropAcceptedTransmissionRemote < Tinrelay::Remote
   def post(path : String, body : String) : String
     response = super
@@ -44,10 +31,10 @@ module TinrelayRelaySpec
 
   def self.capture(sender : Tinrelay::Client, origin : String,
                    coordinate : String, body : String) : Tinrelay::SignedRelayEnvelope
-    remote = RelayCaptureRemote.new(origin)
+    remote = TinrelaySpec::CaptureRemote.new(origin)
     Tinrelay::Client.new(sender.keyring, remote)
       .send(coordinate, body)
-    remote.captured.not_nil!
+    remote.captured.first
   end
 
   def self.signed_envelope(sender : Tinrelay::Client,
@@ -321,7 +308,8 @@ describe "transmission relay transitions" do
 
   it "charges equivalent originals and retries across relay storage outcomes" do
     direct_address = Tinrelay::TinrelaydConfig::ClientAddress.new
-    TinrelaySpec.with_server(client_address: direct_address) do |root, origin, api|
+    policy = Tinrelay::TinrelaydConfig.new(client_address: direct_address)
+    TinrelaySpec.with_server(runtime_policy: policy) do |root, origin, api|
       alpha = TinrelaySpec.admit(root, origin, "alpha")
       beta = TinrelaySpec.admit_contact(root, origin, "beta", alpha)
       gamma = TinrelaySpec.admit_contact(root, origin, "gamma", beta)
@@ -398,7 +386,8 @@ describe "transmission relay transitions" do
 
   it "isolates normalized source buckets through trusted-proxy admission" do
     direct = Tinrelay::TinrelaydConfig::ClientAddress.new
-    TinrelaySpec.with_server(client_address: direct) do |root, origin, api|
+    policy = Tinrelay::TinrelaydConfig.new(client_address: direct)
+    TinrelaySpec.with_server(runtime_policy: policy) do |root, origin, api|
       alpha = TinrelaySpec.admit(root, origin, "alpha")
       beta = TinrelaySpec.admit_contact(root, origin, "beta", alpha)
       TinrelayRelaySpec.trust_forwarded_sources(root, api)

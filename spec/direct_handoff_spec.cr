@@ -1,18 +1,5 @@
 require "./spec_helper"
 
-class EnvelopeCaptureRemote < Tinrelay::Remote
-  getter captured : Tinrelay::SignedRelayEnvelope?
-
-  def post(path : String, body : String) : String
-    if path == "/v1/transmissions"
-      @captured = Tinrelay::SignedRelayEnvelope.from_json(body)
-      %({"state":"accepted"})
-    else
-      super
-    end
-  end
-end
-
 describe "direct radio handoff" do
   it "accepts at durable destination spool acknowledgement without waiting for pointer routing" do
     TinrelaySpec.with_server do |root, origin, api|
@@ -22,10 +9,10 @@ describe "direct radio handoff" do
         root, origin, "beta", alpha
       )
 
-      capture = EnvelopeCaptureRemote.new(origin)
+      capture = TinrelaySpec::CaptureRemote.new(origin)
       composer = Tinrelay::Client.new(beta.keyring, capture)
       composer.send("steward@alpha", "direct payload", "caller")
-      envelope = capture.captured.not_nil!
+      envelope = capture.captured.first
 
       wait_request = TinrelaySpec.radio_wait_request(alpha, 5)
       wait_result = Channel(String).new(1)
@@ -94,11 +81,11 @@ describe "direct radio handoff" do
       beta = TinrelaySpec.admit_contact(
         root, origin, "beta", alpha
       )
-      capture = EnvelopeCaptureRemote.new(origin)
+      capture = TinrelaySpec::CaptureRemote.new(origin)
       composer = Tinrelay::Client.new(beta.keyring, capture)
 
       composer.send("steward@alpha", "no waiter", "caller")
-      absent = capture.captured.not_nil!
+      absent = capture.captured.first
       response = beta.remote.post("/v1/transmissions", absent.to_json)
       JSON.parse(response)["state"].as_s.should eq("accepted")
       api.database.db.query_one(
@@ -113,10 +100,10 @@ describe "direct radio handoff" do
       )
       api.store.acknowledge(absent_ack)
 
-      capture = EnvelopeCaptureRemote.new(origin)
+      capture = TinrelaySpec::CaptureRemote.new(origin)
       composer = Tinrelay::Client.new(beta.keyring, capture)
       composer.send("steward@alpha", "waiter vanished", "caller")
-      interrupted = capture.captured.not_nil!
+      interrupted = capture.captured.first
       wait_request = TinrelaySpec.radio_wait_request(alpha, 5)
       offered = Channel(String).new(1)
       spawn { offered.send(alpha.remote.post("/v1/radio/wait", wait_request.to_json)) }

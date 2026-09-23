@@ -75,26 +75,11 @@ module TinrelayRuntimePolicySpec
 
   def self.prepared(api : Tinrelay::API,
                     ship : String) : Tinrelay::PreparedShipClaim
-    owner = Tinrelay::Crypto.signing_keypair
-    signing = Tinrelay::Crypto.signing_keypair
-    encryption = Tinrelay::Crypto.box_keypair
-    certificate = Tinrelay::ShipRadioCertificate.new(
-      ship, 1, Tinrelay::Crypto.b64(signing.public_key),
-      Tinrelay::Crypto.b64(encryption.public_key), Time.utc.to_unix, 1
-    )
-    certificate.owner_signature = Tinrelay::Crypto.b64(
-      Tinrelay::Crypto.sign(certificate.unsigned_bytes, owner.secret_key)
-    )
-    api.store.prepare_claim(Tinrelay::ShipClaim.new(
-      ship, Tinrelay::Crypto.b64(owner.public_key), certificate
-    ))
+    api.store.prepare_claim(TinrelaySpec.valid_claim(ship))
   end
 
-  def self.claim_body(api : Tinrelay::API, ship : String) : String
-    prepared = prepared(api, ship)
-    Tinrelay::ShipClaim.new(
-      ship, Tinrelay::Crypto.b64(prepared.owner_key), prepared.certificate
-    ).to_json
+  def self.claim_body(ship : String) : String
+    TinrelaySpec.valid_claim(ship).to_json
   end
 end
 
@@ -244,7 +229,7 @@ describe "tinrelayd runtime policy" do
     api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
     begin
       body = TinrelayRuntimePolicySpec::GatedBody.new(
-        TinrelayRuntimePolicySpec.claim_body(api, "stale-policy")
+        TinrelayRuntimePolicySpec.claim_body("stale-policy")
       )
       request = HTTP::Request.new(
         "POST", "/v1/join",
@@ -296,7 +281,7 @@ describe "tinrelayd runtime policy" do
     api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
     begin
       body = TinrelayRuntimePolicySpec::GatedBody.new(
-        TinrelayRuntimePolicySpec.claim_body(api, "stale-policy-metric")
+        TinrelayRuntimePolicySpec.claim_body("stale-policy-metric")
       )
       request = HTTP::Request.new(
         "POST", "/v1/join",
@@ -350,14 +335,20 @@ describe "tinrelayd runtime policy" do
 
   it "returns policy closure without a retry time for a current request" do
     closed = Tinrelay::RegistrationAllowances.new(0, 0, 0, 0)
-    TinrelaySpec.with_server(registration_allowances: closed) do |_root, origin, api|
+    policy = Tinrelay::TinrelaydConfig.new(
+      registration: Tinrelay::TinrelaydConfig::Registration.new(
+        closed.global_hour, closed.global_day,
+        closed.per_source_hour, closed.per_source_day
+      )
+    )
+    TinrelaySpec.with_server(runtime_policy: policy) do |_root, origin, api|
       headers = HTTP::Headers{
         "Content-Type"        => "application/json",
         "X-Tinrelay-Protocol" => Tinrelay::PROTOCOL.to_s,
       }
       response = HTTP::Client.post(
         "#{origin}/v1/join", headers,
-        TinrelayRuntimePolicySpec.claim_body(api, "closed-current")
+        TinrelayRuntimePolicySpec.claim_body("closed-current")
       )
 
       response.status_code.should eq(403)

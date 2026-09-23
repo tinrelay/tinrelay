@@ -1,18 +1,5 @@
 require "./spec_helper"
 
-class SelfTransmissionCaptureRemote < Tinrelay::Remote
-  getter envelope : Tinrelay::SignedRelayEnvelope?
-
-  def post(path : String, body : String) : String
-    if path == "/v1/transmissions"
-      @envelope = Tinrelay::SignedRelayEnvelope.from_json(body)
-      %({"state":"accepted"})
-    else
-      super
-    end
-  end
-end
-
 module TinrelaySelfTransmissionSpec
   def self.submit(origin : String, envelope : Tinrelay::SignedRelayEnvelope) : Tuple(Int32, String)
     headers = HTTP::Headers{
@@ -128,10 +115,10 @@ describe "ordinary self-transmission" do
       ).should eq({"collected", 1_i64})
       spool.routed(absent_event.kind, absent_event.source_id)
 
-      capture = SelfTransmissionCaptureRemote.new(origin)
+      capture = TinrelaySpec::CaptureRemote.new(origin)
       Tinrelay::Client.new(ship.keyring, capture)
         .send("steward@harbor", "handoff interrupted")
-      interrupted = capture.envelope.not_nil!
+      interrupted = capture.captured.first
       wait_result = Channel(String).new(1)
       request = TinrelaySpec.radio_wait_request(ship, 5)
       spawn { wait_result.send(ship.remote.post("/v1/radio/wait", request.to_json)) }
@@ -162,10 +149,10 @@ describe "ordinary self-transmission" do
       alpha = Tinrelay::Client.join(
         File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit(root, origin, "beta")
-      capture = SelfTransmissionCaptureRemote.new(origin)
+      capture = TinrelaySpec::CaptureRemote.new(origin)
       Tinrelay::Client.new(beta.keyring, capture)
         .send("steward@beta", "sealed for beta")
-      self_envelope = capture.envelope.not_nil!
+      self_envelope = capture.captured.first
 
       self_response = TinrelaySelfTransmissionSpec.submit(origin, self_envelope)
       self_response.should eq({202, %({"state":"accepted"})})

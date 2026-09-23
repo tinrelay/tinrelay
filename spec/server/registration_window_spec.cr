@@ -17,19 +17,7 @@ module TinrelayRegistrationWindowSpec
 
   def self.prepared(store : Tinrelay::Store, ship : String,
                     now = 1_000_000_i64) : Tinrelay::PreparedShipClaim
-    owner = Tinrelay::Crypto.signing_keypair
-    signing = Tinrelay::Crypto.signing_keypair
-    encryption = Tinrelay::Crypto.box_keypair
-    certificate = Tinrelay::ShipRadioCertificate.new(
-      ship, 1, Tinrelay::Crypto.b64(signing.public_key),
-      Tinrelay::Crypto.b64(encryption.public_key), now, 1
-    )
-    certificate.owner_signature = Tinrelay::Crypto.b64(
-      Tinrelay::Crypto.sign(certificate.unsigned_bytes, owner.secret_key)
-    )
-    store.prepare_claim(Tinrelay::ShipClaim.new(
-      ship, Tinrelay::Crypto.b64(owner.public_key), certificate
-    ))
+    store.prepare_claim(TinrelaySpec.valid_claim(ship, now))
   end
 
   def self.claim(store : Tinrelay::Store, ship : String, bucket : String,

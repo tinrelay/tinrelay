@@ -11,19 +11,6 @@ end
 module TinrelayStoreWriterConcurrencySpec
   TRACE_STATEMENT = 1_u32
 
-  class CaptureRemote < Tinrelay::Remote
-    getter captured : Tinrelay::SignedRelayEnvelope?
-
-    def post(path : String, body : String) : String
-      if path == "/v1/transmissions"
-        @captured = Tinrelay::SignedRelayEnvelope.from_json(body)
-        %({"state":"accepted"})
-      else
-        super
-      end
-    end
-  end
-
   class StatementBarrier
     @entered = Channel(Nil).new(1)
     @release = Channel(Nil).new(1)
@@ -101,24 +88,9 @@ module TinrelayStoreWriterConcurrencySpec
 
   def self.capture(sender : Tinrelay::Client, origin : String,
                    coordinate : String, body : String) : Tinrelay::SignedRelayEnvelope
-    remote = CaptureRemote.new(origin)
+    remote = TinrelaySpec::CaptureRemote.new(origin)
     Tinrelay::Client.new(sender.keyring, remote).send(coordinate, body)
-    remote.captured.not_nil!
-  end
-
-  def self.claim(ship : String) : Tinrelay::ShipClaim
-    owner = Tinrelay::Crypto.signing_keypair
-    signing = Tinrelay::Crypto.signing_keypair
-    encryption = Tinrelay::Crypto.box_keypair
-    now = Time.utc.to_unix
-    certificate = Tinrelay::ShipRadioCertificate.new(
-      ship, 1, Tinrelay::Crypto.b64(signing.public_key),
-      Tinrelay::Crypto.b64(encryption.public_key), now, 1
-    )
-    certificate.owner_signature = Tinrelay::Crypto.b64(
-      Tinrelay::Crypto.sign(certificate.unsigned_bytes, owner.secret_key)
-    )
-    Tinrelay::ShipClaim.new(ship, Tinrelay::Crypto.b64(owner.public_key), certificate)
+    remote.captured.first
   end
 end
 
@@ -179,7 +151,7 @@ describe "Store writer admission" do
       )
       TinrelayStoreWriterConcurrencySpec.install_barrier(api, barrier)
       claim = TinrelayStoreWriterConcurrencySpec.dispatch(
-        api, "/v1/join", TinrelayStoreWriterConcurrencySpec.claim("claiming-ship").to_json
+        api, "/v1/join", TinrelaySpec.valid_claim("claiming-ship").to_json
       )
       barrier.await
       cleanup = Channel(Exception?).new(1)

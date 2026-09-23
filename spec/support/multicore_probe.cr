@@ -1,6 +1,7 @@
 require "file_utils"
 require "../../src/tinrelay/client/runtime"
 require "../../src/tinrelay/server/server"
+require "./envelope_fixtures"
 
 class ProbeMetrics
   @mutex = Mutex.new
@@ -30,19 +31,6 @@ class ProbeMetrics
 
   def snapshot
     @mutex.synchronize { {threads: @threads.size, max_inflight: @max_inflight} }
-  end
-end
-
-class ProbeCaptureRemote < Tinrelay::Remote
-  getter captured = [] of Tinrelay::SignedRelayEnvelope
-
-  def post(path : String, body : String) : String
-    if path == "/v1/transmissions"
-      @captured << Tinrelay::SignedRelayEnvelope.from_json(body)
-      %({"state":"accepted"})
-    else
-      super
-    end
   end
 end
 
@@ -142,10 +130,10 @@ begin
   connect_ships(root, alpha, beta)
   gamma = admit_ship(root, origin, "gamma")
   connect_ships(root, alpha, gamma)
-  capture = ProbeCaptureRemote.new(origin)
+  capture = TinrelaySpec::CaptureRemote.new(origin)
   composer = Tinrelay::Client.new(beta.keyring, capture)
   writes.times { |index| composer.send("steward@alpha", "probe #{index}", "caller") }
-  direct_capture = ProbeCaptureRemote.new(origin)
+  direct_capture = TinrelaySpec::CaptureRemote.new(origin)
   Tinrelay::Client.new(gamma.keyring, direct_capture)
     .send("steward@alpha", "direct probe", "caller")
 
@@ -173,7 +161,7 @@ begin
   metrics.reset
   read_started = Time.instant
   read_result = burst(reads, concurrency) do
-    response = HTTP::Client.get("#{origin}/line")
+    response = HTTP::Client.get("#{origin}/healthz")
     raise "read status #{response.status_code}" unless response.status_code == 200
   end
   read_wall = (Time.instant - read_started).total_milliseconds

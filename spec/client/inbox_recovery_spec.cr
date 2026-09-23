@@ -1,18 +1,5 @@
 require "../spec_helper"
 
-class InboxCaptureRemote < Tinrelay::Remote
-  getter captured = [] of Tinrelay::SignedRelayEnvelope
-
-  def post(path : String, body : String) : String
-    if path == "/v1/transmissions"
-      captured << Tinrelay::SignedRelayEnvelope.from_json(body)
-      %({"state":"accepted"})
-    else
-      super
-    end
-  end
-end
-
 class InboxSequenceRemote < Tinrelay::Remote
   getter acknowledgements = [] of String
 
@@ -39,36 +26,13 @@ module TinrelayInboxSpec
                         recipient : Tinrelay::Client,
                         envelope : Tinrelay::SignedRelayEnvelope,
                         body : String) : Tinrelay::SignedRelayEnvelope
-    radio = sender.keyring.data.radio!(envelope.sender_signing_generation)
     transmission = Tinrelay::SignedTransmission.new(
       envelope.transmission_id, envelope.sender_ship,
       envelope.sender_signing_generation, envelope.recipient_ship,
       envelope.recipient_encryption_generation, envelope.created_at,
       "steward", body, "caller"
     )
-    transmission.signature = Tinrelay::Crypto.b64(
-      Tinrelay::Crypto.sign(
-        transmission.signing_bytes,
-        Tinrelay::Crypto.unb64(radio.signing.secret_key)
-      )
-    )
-    recipient_radio = recipient.keyring.data.radio!(
-      envelope.recipient_encryption_generation
-    )
-    changed = Tinrelay::SignedRelayEnvelope.from_json(envelope.to_json)
-    changed.ciphertext = Tinrelay::Crypto.b64(
-      Tinrelay::Crypto.seal(
-        transmission.to_json.to_slice,
-        Tinrelay::Crypto.unb64(recipient_radio.encryption.public_key)
-      )
-    )
-    changed.signature = Tinrelay::Crypto.b64(
-      Tinrelay::Crypto.sign(
-        changed.signing_bytes,
-        Tinrelay::Crypto.unb64(radio.signing.secret_key)
-      )
-    )
-    changed
+    TinrelaySpec.reseal(envelope, transmission, sender, recipient, resign_inner: true)
   end
 
   def self.record_path(root : String, local_id : String) : String
@@ -111,7 +75,7 @@ describe "inbox recovery transitions" do
       beta = TinrelaySpec.admit_contact(
         root, origin, "beta", alpha
       )
-      capture = InboxCaptureRemote.new(origin)
+      capture = TinrelaySpec::CaptureRemote.new(origin)
       Tinrelay::Client.new(beta.keyring, capture)
         .send("steward@alpha", "first signed words", "caller")
       original = capture.captured.first
@@ -147,7 +111,7 @@ describe "inbox recovery transitions" do
       beta = TinrelaySpec.admit_contact(
         root, origin, "beta", alpha
       )
-      capture = InboxCaptureRemote.new(origin)
+      capture = TinrelaySpec::CaptureRemote.new(origin)
       Tinrelay::Client.new(beta.keyring, capture)
         .send("steward@alpha", "must remain sealed", "caller")
       forged = capture.captured.first
@@ -175,7 +139,7 @@ describe "inbox recovery transitions" do
       beta = TinrelaySpec.admit_contact(
         root, origin, "beta", alpha
       )
-      capture = InboxCaptureRemote.new(origin)
+      capture = TinrelaySpec::CaptureRemote.new(origin)
       composer = Tinrelay::Client.new(beta.keyring, capture)
       composer.send("steward@alpha", "old immutable evidence", "caller")
       composer.send("steward@alpha", "new pending work", "caller")

@@ -1,18 +1,5 @@
 require "./spec_helper"
 
-class TrustCaptureRemote < Tinrelay::Remote
-  getter envelopes = [] of Tinrelay::SignedRelayEnvelope
-
-  def post(path : String, body : String) : String
-    if path == "/v1/transmissions"
-      envelopes << Tinrelay::SignedRelayEnvelope.from_json(body)
-      %({"state":"accepted"})
-    else
-      super
-    end
-  end
-end
-
 class RadioSequenceRemote < Tinrelay::Remote
   getter acknowledgements = [] of String
 
@@ -218,10 +205,10 @@ describe "trust and recovery transitions" do
         File.join(root, "alpha.keyring"), origin, "alpha")
       beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
-      capture = TrustCaptureRemote.new(origin)
+      capture = TinrelaySpec::CaptureRemote.new(origin)
       Tinrelay::Client.new(beta.keyring, capture)
         .send("steward@alpha", "pinned identity survives registry substitution")
-      envelope = capture.envelopes.first
+      envelope = capture.captured.first
 
       genuine = JSON.parse(beta.who("beta"))
       attacker = Tinrelay::Crypto.signing_keypair
@@ -544,11 +531,11 @@ describe "trust and recovery transitions" do
       beta = TinrelaySpec.admit_contact(
         root, origin, "beta", alpha
       )
-      capture = TrustCaptureRemote.new(origin)
+      capture = TinrelaySpec::CaptureRemote.new(origin)
       composer = Tinrelay::Client.new(beta.keyring, capture)
       composer.send("steward@alpha", "exactly once pointer")
       composer.send("steward@alpha", "later valid traffic")
-      first, later = capture.envelopes
+      first, later = capture.captured
       remote = RadioSequenceRemote.new(origin, [
         Tinrelay::RadioWaitResponse.new(envelope: first),
         Tinrelay::RadioWaitResponse.new(envelope: first),

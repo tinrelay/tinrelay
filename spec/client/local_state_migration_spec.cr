@@ -1,18 +1,5 @@
 require "../spec_helper"
 
-class MigrationCaptureRemote < Tinrelay::Remote
-  getter captured = [] of Tinrelay::SignedRelayEnvelope
-
-  def post(path : String, body : String) : String
-    if path == "/v1/transmissions"
-      captured << Tinrelay::SignedRelayEnvelope.from_json(body)
-      %({"state":"accepted"})
-    else
-      super
-    end
-  end
-end
-
 class MigrationSequenceRemote < Tinrelay::Remote
   def initialize(origin : String, @envelope : Tinrelay::SignedRelayEnvelope)
     super(origin)
@@ -82,7 +69,7 @@ describe Tinrelay::LocalStateMigration do
       paths = Tinrelay::LocalPaths.new("alpha", home)
       alpha = Tinrelay::Client.join(paths.keyring, origin, "alpha", paths.owner_key)
       beta = TinrelaySpec.admit_contact(root, origin, "beta", alpha)
-      capture = MigrationCaptureRemote.new(origin)
+      capture = TinrelaySpec::CaptureRemote.new(origin)
       Tinrelay::Client.new(beta.keyring, capture)
         .send("steward@alpha", "migration words", "caller")
       receiver = Tinrelay::Client.new(

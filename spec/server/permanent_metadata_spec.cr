@@ -61,106 +61,6 @@ module TinrelayPermanentMetadataSpec
     )
     rotation
   end
-
-  def self.seed_radio_history(api : Tinrelay::API, client : Tinrelay::Client,
-                              owner_generation : Int32,
-                              revoked_at : Array(Int64?)) : Int32
-    return 1 if revoked_at.empty?
-    ship = client.keyring.data.ship
-    radio = client.keyring.data.radio!
-    owner = client.keyring.owner.key
-    api.database.db.transaction do |transaction|
-      connection = transaction.connection
-      connection.exec(
-        "UPDATE ship_radio_keys SET state = 'rotated', revoked_at = ? " +
-        "WHERE ship = ? AND generation = 1",
-        revoked_at.first, ship
-      )
-      revoked_at.each_with_index do |timestamp, index|
-        generation = index + 1
-        next if generation == 1
-        connection.exec(
-          "INSERT INTO ship_radio_keys(" +
-          "ship, generation, signing_public_key, encryption_public_key, " +
-          "state, issued_at, owner_generation, owner_signature, revoked_at" +
-          ") VALUES (?, ?, ?, ?, 'rotated', 0, ?, ?, ?)",
-          ship, generation, Tinrelay::Crypto.signing_keypair.public_key,
-          Tinrelay::Crypto.box_keypair.public_key, owner_generation,
-          Bytes.new(Tinrelay::Crypto::SIGNATURE_BYTES), timestamp
-        )
-      end
-      active_generation = revoked_at.size + 1
-      certificate = Tinrelay::ShipRadioCertificate.new(
-        ship, active_generation, radio.signing.public_key,
-        radio.encryption.public_key, 0_i64, owner_generation
-      )
-      certificate.owner_signature = Tinrelay::Crypto.b64(
-        Tinrelay::Crypto.sign(
-          certificate.unsigned_bytes, Tinrelay::Crypto.unb64(owner.secret_key)
-        )
-      )
-      connection.exec(
-        "INSERT INTO ship_radio_keys(" +
-        "ship, generation, signing_public_key, encryption_public_key, " +
-        "state, issued_at, owner_generation, owner_signature" +
-        ") VALUES (?, ?, ?, ?, 'active', 0, ?, ?)",
-        ship, active_generation, Tinrelay::Crypto.unb64(radio.signing.public_key),
-        Tinrelay::Crypto.unb64(radio.encryption.public_key), owner_generation,
-        Tinrelay::Crypto.unb64(certificate.owner_signature)
-      )
-      active_generation
-    end.not_nil!.to_i
-  end
-
-  def self.relationship_close(client : Tinrelay::Client,
-                              peer : String, radio_generation : Int32,
-                              owner_generation : Int32, admin_generation : Int64,
-                              now : Int64) : Tinrelay::RelationshipClose
-    prior = client.keyring.data.radio!
-    owner = client.keyring.owner.key
-    signing = Tinrelay::Crypto.signing_keypair
-    encryption = Tinrelay::Crypto.box_keypair
-    certificate = Tinrelay::ShipRadioCertificate.new(
-      client.keyring.data.ship, radio_generation + 1,
-      Tinrelay::Crypto.b64(signing.public_key),
-      Tinrelay::Crypto.b64(encryption.public_key), now, owner_generation
-    )
-    certificate.owner_signature = Tinrelay::Crypto.b64(
-      Tinrelay::Crypto.sign(
-        certificate.unsigned_bytes, Tinrelay::Crypto.unb64(owner.secret_key)
-      )
-    )
-    prior_signature = Tinrelay::Crypto.b64(
-      Tinrelay::Crypto.sign(
-        certificate.unsigned_bytes,
-        Tinrelay::Crypto.unb64(prior.signing.secret_key)
-      )
-    )
-    auth = Tinrelay::OwnerAuth.new(
-      client.keyring.data.ship, owner_generation, admin_generation, now
-    )
-    closure = Tinrelay::RelationshipClose.new(
-      peer, [] of String, certificate, prior_signature, auth
-    )
-    auth.signature = Tinrelay::Crypto.b64(
-      Tinrelay::Crypto.sign(
-        auth.signing_bytes("relationship.close", closure.payload),
-        Tinrelay::Crypto.unb64(owner.secret_key)
-      )
-    )
-    closure
-  end
-
-  def self.post(origin : String, path : String, body : String) : HTTP::Client::Response
-    HTTP::Client.post(
-      "#{origin}#{path}",
-      HTTP::Headers{
-        "Content-Type"        => "application/json",
-        "X-Tinrelay-Protocol" => Tinrelay::PROTOCOL.to_s,
-      },
-      body
-    )
-  end
 end
 
 describe "permanent relay metadata capacity" do
@@ -266,7 +166,7 @@ describe "permanent relay metadata capacity" do
       request = TinrelayPermanentMetadataSpec.owner_rotation(
         alpha, generation, 1_i64, now
       )
-      response = TinrelayPermanentMetadataSpec.post(
+      response = TinrelaySpec.post(
         origin, "/v1/owners/rotate", request.to_json
       )
       response.status_code.should eq(429)
@@ -284,7 +184,7 @@ describe "permanent relay metadata capacity" do
       invalid = TinrelayPermanentMetadataSpec.owner_rotation(
         beta, beta_generation, 1_i64, Time.utc.to_unix
       )
-      corrupt = TinrelayPermanentMetadataSpec.post(
+      corrupt = TinrelaySpec.post(
         origin, "/v1/owners/rotate", invalid.to_json
       )
       corrupt.status_code.should eq(500)
@@ -298,11 +198,11 @@ describe "permanent relay metadata capacity" do
       beta = TinrelaySpec.admit(root, origin, "beta")
       TinrelaySpec.connect(root, alpha, beta)
       now = 200_000_i64
-      radio_generation = TinrelayPermanentMetadataSpec.seed_radio_history(
+      radio_generation = TinrelaySpec.seed_radio_history(
         api, alpha, 1,
-        Array(Int64?).new(Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY, now - 1)
+        Array(Int64?).new(Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY, now - 1), 0_i64
       )
-      closure = TinrelayPermanentMetadataSpec.relationship_close(
+      closure = TinrelaySpec.relationship_close(
         alpha, "beta", radio_generation, 1, 1_i64, now
       )
       limited = expect_raises(Tinrelay::RotationLimited) do
@@ -338,11 +238,11 @@ describe "permanent relay metadata capacity" do
         api, alpha,
         Array(Int64?).new(Tinrelay::Store::MAX_OWNER_ROTATIONS_PER_DAY, cutoff + 1)
       )
-      radio_generation = TinrelayPermanentMetadataSpec.seed_radio_history(
+      radio_generation = TinrelaySpec.seed_radio_history(
         api, alpha, owner_generation,
-        Array(Int64?).new(Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY - 1, now - 1)
+        Array(Int64?).new(Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY - 1, now - 1), 0_i64
       )
-      closure = TinrelayPermanentMetadataSpec.relationship_close(
+      closure = TinrelaySpec.relationship_close(
         alpha, "beta", radio_generation,
         owner_generation, 1_i64, now
       )
@@ -358,19 +258,7 @@ describe "permanent relay metadata capacity" do
     database = Tinrelay::Database.new(File.join(root, "capacity.db"), 2)
     store = Tinrelay::Store.new(database, 3_i64)
     prepared = %w(alpha beta).map do |ship|
-      owner = Tinrelay::Crypto.signing_keypair
-      signing = Tinrelay::Crypto.signing_keypair
-      encryption = Tinrelay::Crypto.box_keypair
-      certificate = Tinrelay::ShipRadioCertificate.new(
-        ship, 1, Tinrelay::Crypto.b64(signing.public_key),
-        Tinrelay::Crypto.b64(encryption.public_key), Time.utc.to_unix, 1
-      )
-      certificate.owner_signature = Tinrelay::Crypto.b64(
-        Tinrelay::Crypto.sign(certificate.unsigned_bytes, owner.secret_key)
-      )
-      store.prepare_claim(Tinrelay::ShipClaim.new(
-        ship, Tinrelay::Crypto.b64(owner.public_key), certificate
-      ))
+      store.prepare_claim(TinrelaySpec.valid_claim(ship))
     end
     results = Channel(Exception?).new(2)
 

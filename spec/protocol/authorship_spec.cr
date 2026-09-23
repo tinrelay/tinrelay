@@ -1,25 +1,12 @@
 require "../spec_helper"
 
-class AuthorshipCaptureRemote < Tinrelay::Remote
-  getter captured : Tinrelay::SignedRelayEnvelope?
-
-  def post(path : String, body : String) : String
-    if path == "/v1/transmissions"
-      @captured = Tinrelay::SignedRelayEnvelope.from_json(body)
-      %({"state":"accepted"})
-    else
-      super
-    end
-  end
-end
-
 module TinrelayAuthorshipSpec
   def self.capture(sender : Tinrelay::Client, origin : String,
                    body : String) : Tinrelay::SignedRelayEnvelope
-    remote = AuthorshipCaptureRemote.new(origin)
+    remote = TinrelaySpec::CaptureRemote.new(origin)
     Tinrelay::Client.new(sender.keyring, remote)
       .send("steward@alpha", body, "caller")
-    remote.captured.not_nil!
+    remote.captured.first
   end
 
   def self.open(envelope : Tinrelay::SignedRelayEnvelope,
@@ -33,41 +20,6 @@ module TinrelayAuthorshipSpec
       Tinrelay::Crypto.unb64(radio.encryption.secret_key)
     )
     Tinrelay::SignedTransmission.from_json(String.new(plaintext))
-  end
-
-  def self.reseal(envelope : Tinrelay::SignedRelayEnvelope,
-                  transmission : Tinrelay::SignedTransmission,
-                  sender : Tinrelay::Client,
-                  recipient : Tinrelay::Client,
-                  resign_inner : Bool) : Tinrelay::SignedRelayEnvelope
-    sender_radio = sender.keyring.data.radio!(
-      envelope.sender_signing_generation
-    )
-    if resign_inner
-      transmission.signature = Tinrelay::Crypto.b64(
-        Tinrelay::Crypto.sign(
-          transmission.signing_bytes,
-          Tinrelay::Crypto.unb64(sender_radio.signing.secret_key)
-        )
-      )
-    end
-    recipient_radio = recipient.keyring.data.radio!(
-      envelope.recipient_encryption_generation
-    )
-    changed = Tinrelay::SignedRelayEnvelope.from_json(envelope.to_json)
-    changed.ciphertext = Tinrelay::Crypto.b64(
-      Tinrelay::Crypto.seal(
-        transmission.to_json.to_slice,
-        Tinrelay::Crypto.unb64(recipient_radio.encryption.public_key)
-      )
-    )
-    changed.signature = Tinrelay::Crypto.b64(
-      Tinrelay::Crypto.sign(
-        changed.signing_bytes,
-        Tinrelay::Crypto.unb64(sender_radio.signing.secret_key)
-      )
-    )
-    changed
   end
 end
 
@@ -130,14 +82,14 @@ describe "protocol-1 ship authorship" do
       changed_body = TinrelayAuthorshipSpec.capture(beta, origin, "signed words")
       body = TinrelayAuthorshipSpec.open(changed_body, alpha)
       body.body = "changed words"
-      invalid_cases << TinrelayAuthorshipSpec.reseal(
+      invalid_cases << TinrelaySpec.reseal(
         changed_body, body, beta, alpha, resign_inner: false
       )
 
       changed_context = TinrelayAuthorshipSpec.capture(beta, origin, "signed context")
       context = TinrelayAuthorshipSpec.open(changed_context, alpha)
       context.to_label = "alerts"
-      invalid_cases << TinrelayAuthorshipSpec.reseal(
+      invalid_cases << TinrelaySpec.reseal(
         changed_context, context, beta, alpha, resign_inner: false
       )
 
@@ -155,7 +107,7 @@ describe "protocol-1 ship authorship" do
         envelope = TinrelayAuthorshipSpec.capture(beta, origin, "mismatch #{label}")
         inner = TinrelayAuthorshipSpec.open(envelope, alpha)
         mutate.call(inner)
-        invalid_cases << TinrelayAuthorshipSpec.reseal(
+        invalid_cases << TinrelaySpec.reseal(
           envelope, inner, beta, alpha, resign_inner: true
         )
       end

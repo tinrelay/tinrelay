@@ -111,9 +111,14 @@ describe "contact trust and content-free hails" do
   end
 
   it "keeps collected hails in the recipient bound and selects correspondence first" do
-    TinrelaySpec.with_server(
-      registration_allowances: TinrelaySpec::OPEN_REGISTRATION_ALLOWANCES
-    ) do |root, origin, api|
+    allowances = TinrelaySpec::OPEN_REGISTRATION_ALLOWANCES
+    policy = Tinrelay::TinrelaydConfig.new(
+      registration: Tinrelay::TinrelaydConfig::Registration.new(
+        allowances.global_hour, allowances.global_day,
+        allowances.per_source_hour, allowances.per_source_day
+      )
+    )
+    TinrelaySpec.with_server(runtime_policy: policy) do |root, origin, api|
       alpha = TinrelaySpec.admit(root, origin, "alpha")
       beta = TinrelaySpec.admit_contact(
         root, origin, "beta", alpha
