@@ -48,7 +48,7 @@ module Tinrelay
     private def retryable_transport_error?(error : IO::Error) : Bool
       case os_error = error.os_error
       when Errno
-        os_error == Errno.parse?("ETIMEDOUT")
+        os_error == Errno.parse?("ETIMEDOUT") || os_error == Errno.parse?("EPIPE")
       when WinError
         os_error == WinError.parse?("WSAETIMEDOUT")
       else

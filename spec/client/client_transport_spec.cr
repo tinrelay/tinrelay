@@ -63,6 +63,15 @@ describe Tinrelay::Remote do
     remote.retryable_transport_error_for_spec?(timeout).should be_true
   end
 
+  {% if flag?(:darwin) || flag?(:linux) %}
+    it "classifies a broken socket write as unavailable transport" do
+      remote = TinrelayClientTransportSpec::Remote.new("https://relay.example")
+      broken_pipe = IO::Error.from_os_error("write", Errno::EPIPE)
+
+      remote.retryable_transport_error_for_spec?(broken_pipe).should be_true
+    end
+  {% end %}
+
   it "classifies network transport failures for bounded caller retry" do
     server = TCPServer.new("127.0.0.1", 0)
     port = server.local_address.port
