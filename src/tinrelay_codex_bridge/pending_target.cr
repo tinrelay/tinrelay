@@ -11,7 +11,11 @@ module TinrelayCodexBridge
     kind : String,
     source_id : String,
     task_id : String,
-    state : DeliveryState
+    state : DeliveryState do
+    def identifies?(kind : String, source_id : String) : Bool
+      @kind == kind && @source_id == source_id
+    end
+  end
 
   class PendingTarget
     MAX_BYTES = 1024
@@ -22,10 +26,8 @@ module TinrelayCodexBridge
     def load : PendingTargetBinding?
       return unless File.exists?(@path)
       bytes = File.open(@path) do |file|
-        buffer = IO::Memory.new
-        count = IO.copy(file, buffer, MAX_BYTES + 1)
-        raise Blocked.new("pending_target_too_large") if count > MAX_BYTES
-        buffer.to_s
+        Tinrelay::BoundedIO.read(file, MAX_BYTES) ||
+          raise Blocked.new("pending_target_too_large")
       end
       value = JSON.parse(bytes).as_h
       unless value.keys.sort == ["kind", "source_id", "state", "task_id"]
@@ -35,7 +37,7 @@ module TinrelayCodexBridge
       source_id = value["source_id"].as_s
       task_id = value["task_id"].as_s
       state = parse_state(value["state"].as_s)
-      raise Blocked.new("invalid_pending_target") unless valid_identity?(kind, source_id)
+      raise Blocked.new("invalid_pending_target") unless Tinrelay::Ids.source?(kind, source_id)
       raise Blocked.new("invalid_pending_target") unless valid_task_id?(task_id)
       PendingTargetBinding.new(kind, source_id, task_id, state)
     rescue File::Error
@@ -46,7 +48,7 @@ module TinrelayCodexBridge
 
     def bind(kind : String, source_id : String, task_id : String) : PendingTargetBinding
       if current = load
-        unless current.kind == kind && current.source_id == source_id
+        unless current.identifies?(kind, source_id)
           raise Blocked.new("pending_target_conflict")
         end
         return current
@@ -66,7 +68,7 @@ module TinrelayCodexBridge
 
     def clear(kind : String, source_id : String)
       current = load || return
-      unless current.kind == kind && current.source_id == source_id
+      unless current.identifies?(kind, source_id)
         raise Blocked.new("pending_target_conflict")
       end
       Tinrelay::PrivateStorage.delete_replay_safe(@path)
@@ -87,19 +89,8 @@ module TinrelayCodexBridge
       binding
     end
 
-    private def valid_identity?(kind, value)
-      case kind
-      when "transmission", "hail"
-        SOURCE_UUID.matches?(value)
-      when "rejected_transmission"
-        /\Atr_[0-9a-f]{32}\z/.matches?(value)
-      else
-        false
-      end
-    end
-
     private def valid_task_id?(value)
-      /\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/.matches?(value)
+      Tinrelay::Ids::TASK_UUID.matches?(value)
     end
 
     private def parse_state(value)

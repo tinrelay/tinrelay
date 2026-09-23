@@ -18,19 +18,14 @@ module Tinrelay
 
     private def update_pinned_sender!(envelope : SignedRelayEnvelope,
                                       certificate : ShipRadioCertificate,
-                                      owner_generation : Int32,
-                                      owner_public : String,
                                       owner_chain : Array(OwnerKeyLink)) : Bool
       contact = keyring.data.contact!(envelope.sender_ship)
       if certificate.generation == contact.radio_certificate.generation &&
-         certificate.to_json != contact.radio_certificate.to_json
+         !certificate.same_certificate?(contact.radio_certificate)
         raise Unauthorized.new("pinned sender radio changed within one generation")
       end
       return false unless certificate.generation > contact.radio_certificate.generation
-      contact.owner_chain = owner_chain
-      contact.owner_generation = owner_generation
-      contact.owner_public_key = owner_public
-      contact.radio_certificate = certificate
+      contact.adopt_verified_identity!(owner_chain, certificate)
       true
     end
 
@@ -48,20 +43,8 @@ module Tinrelay
       owners = record.sender_owner_chain
       owner = owners.find { |link| link.generation == certificate.owner_generation } ||
               raise Unauthorized.new("hail owner key is absent")
-      owners.each_cons(2) do |pair|
-        previous, current = pair
-        unless current.generation == previous.generation + 1
-          raise Unauthorized.new("hail owner continuity skips a generation")
-        end
-        signature = current.authorization_signature ||
-                    raise Unauthorized.new("hail owner continuity lacks an authorization")
-        bytes = Canonical.fields(
-          "tinrelay-owner-rotation-v1", hail.sender_ship,
-          current.generation.to_s, current.public_key
-        )
-        unless Crypto.verify(bytes, Crypto.unb64(signature), Crypto.unb64(previous.public_key))
-          raise Unauthorized.new("hail owner continuity is invalid")
-        end
+      if reason = OwnerKeyLink.continuity_issue(hail.sender_ship, owners.first, owners[1..])
+        raise Unauthorized.new("hail owner continuity #{reason}")
       end
       if prior
         observed_anchor = owners.first(prior.owner_chain.size).map(&.to_json)
@@ -69,17 +52,10 @@ module Tinrelay
           raise Unauthorized.new("hail owner identity differs from the local pin")
         end
       end
-      unless Crypto.verify(
-               certificate.unsigned_bytes,
-               Crypto.unb64(certificate.owner_signature),
-               Crypto.unb64(owner.public_key)
-             )
+      unless certificate.owner_authorized?(Crypto.unb64(owner.public_key))
         raise Unauthorized.new("hail radio certificate is not owner-authorized")
       end
-      unless Crypto.verify(
-               hail.signing_bytes, Crypto.unb64(hail.signature),
-               Crypto.unb64(certificate.signing_public_key)
-             )
+      unless hail.signed_by?(Crypto.unb64(certificate.signing_public_key))
         raise Unauthorized.new("hail signature is invalid")
       end
     end
@@ -92,7 +68,7 @@ module Tinrelay
       if contact.radio_certificate.generation >= update.to_generation
         if contact.radio_certificate.generation == update.to_generation
           delivered = update.chain.last?.try(&.certificate)
-          unless delivered && delivered.to_json == contact.radio_certificate.to_json
+          unless delivered && delivered.same_certificate?(contact.radio_certificate)
             raise Unauthorized.new("contact update conflicts with the current radio identity")
           end
         end
@@ -109,40 +85,19 @@ module Tinrelay
         contact, radio_links, update.chain.last.certificate, owners
       )
       changed = owners != contact.owner_chain ||
-                certificate.to_json != contact.radio_certificate.to_json
+                !certificate.same_certificate?(contact.radio_certificate)
       return false unless changed
-      current_owner = owners.last
-      contact.owner_chain = owners
-      contact.owner_generation = current_owner.generation
-      contact.owner_public_key = current_owner.public_key
-      contact.radio_certificate = certificate
+      contact.adopt_verified_identity!(owners, certificate)
       true
     end
 
     private def verify_owner_chain(contact : ShipContact,
                                    links : Array(OwnerKeyLink)) : Array(OwnerKeyLink)
       owners = contact.owner_chain.dup
-      current = owners.last
-      links.each do |link|
-        unless link.generation == current.generation + 1
-          raise Unauthorized.new("owner continuity chain skips a generation")
-        end
-        signature = link.authorization_signature ||
-                    raise Unauthorized.new("owner continuity chain lacks an authorization")
-        bytes = Canonical.fields(
-          "tinrelay-owner-rotation-v1", contact.ship,
-          link.generation.to_s, link.public_key
-        )
-        unless Crypto.verify(
-                 bytes, Crypto.unb64(signature),
-                 Crypto.unb64(current.public_key)
-               )
-          raise Unauthorized.new("owner continuity chain is invalid")
-        end
-        owners << link
-        current = link
+      if reason = OwnerKeyLink.continuity_issue(contact.ship, owners.last, links)
+        raise Unauthorized.new("owner continuity chain #{reason}")
       end
-      owners
+      owners.concat(links)
     end
 
     private def verify_radio_chain(
@@ -165,11 +120,7 @@ module Tinrelay
         end
         owner = owners.find { |item| item.generation == certificate.owner_generation } ||
                 raise Unauthorized.new("radio continuity chain lacks its owner key")
-        unless Crypto.verify(
-                 certificate.unsigned_bytes,
-                 Crypto.unb64(certificate.owner_signature),
-                 Crypto.unb64(owner.public_key)
-               )
+        unless certificate.owner_authorized?(Crypto.unb64(owner.public_key))
           raise Unauthorized.new("radio continuity certificate is not owner-authorized")
         end
         prior_signature = link.prior_radio_signature ||
@@ -182,7 +133,7 @@ module Tinrelay
         end
         current = certificate
       end
-      unless current.to_json == final_certificate.to_json
+      unless current.same_certificate?(final_certificate)
         raise Unauthorized.new("radio continuity chain does not reach the delivered certificate")
       end
       current
@@ -198,12 +149,9 @@ module Tinrelay
       owner_chain = owner_chain_evidence(document, contact, owner_generation)
       changed = contact.owner_generation != owner_generation ||
                 contact.owner_public_key != owner_public ||
-                contact.radio_certificate.to_json != certificate.to_json
+                !contact.radio_certificate.same_certificate?(certificate)
       return false unless changed
-      contact.owner_chain = owner_chain
-      contact.owner_generation = owner_generation
-      contact.owner_public_key = owner_public
-      contact.radio_certificate = certificate
+      contact.adopt_verified_identity!(owner_chain, certificate)
       true
     end
 
@@ -214,16 +162,8 @@ module Tinrelay
               raise Unauthorized.new("sender radio key is absent from registry")
       owner_generation = radio["owner_generation"].as_i.to_i
       owner_public = trusted_owner(document, owner_generation, contact)
-      certificate = ShipRadioCertificate.new(
-        ship, generation, radio["signing_public_key"].as_s,
-        radio["encryption_public_key"].as_s, radio["issued_at"].as_i64,
-        owner_generation, radio["owner_signature"].as_s
-      )
-      unless Crypto.verify(
-               certificate.unsigned_bytes,
-               Crypto.unb64(certificate.owner_signature),
-               Crypto.unb64(owner_public)
-             )
+      certificate = RegistryEvidence.radio_certificate(ship, radio)
+      unless certificate.owner_authorized?(Crypto.unb64(owner_public))
         raise Unauthorized.new("ship radio certificate is invalid")
       end
       {certificate, owner_generation, owner_public}
@@ -245,34 +185,30 @@ module Tinrelay
                 raise Unauthorized.new("ship owner key is absent from registry")
         return owner["public_key"].as_s
       end
-      while generation < target
-        next_owner = owners.find { |item| item["generation"].as_i == generation + 1 } ||
-                     raise Unauthorized.new("owner rotation chain is incomplete")
-        next_public = next_owner["public_key"].as_s
-        signature = next_owner["authorization_signature"]?.try(&.as_s?) ||
-                    raise Unauthorized.new("owner rotation chain lacks a signature")
-        bytes = Canonical.fields(
-          "tinrelay-owner-rotation-v1", document["ship"].as_s,
-          (generation + 1).to_s, next_public
-        )
-        unless Crypto.verify(bytes, Crypto.unb64(signature), Crypto.unb64(public_key))
-          raise Unauthorized.new("owner rotation chain is invalid")
-        end
-        generation += 1
-        public_key = next_public
-      end
-      unless generation == target
+      if generation > target
         raise Unauthorized.new("registry returned an older owner generation")
       end
-      public_key
+      links = owner_links_after(document, generation, target)
+      anchor = OwnerKeyLink.new(generation, public_key)
+      if reason = OwnerKeyLink.continuity_issue(document["ship"].as_s, anchor, links)
+        raise Unauthorized.new("owner rotation chain #{reason}")
+      end
+      if generation < target && links.last?.try(&.generation) != target
+        raise Unauthorized.new("owner rotation chain is incomplete")
+      end
+      links.last?.try(&.public_key) || public_key
     end
 
     private def owner_chain_evidence(document : JSON::Any,
                                      contact : ShipContact?,
                                      target : Int32) : Array(OwnerKeyLink)
-      start = contact.try(&.owner_generation) || target
+      if contact
+        return contact.owner_chain + owner_links_after(
+          document, contact.owner_generation, target
+        )
+      end
       observed = document["owner_keys"].as_a
-        .select { |item| item["generation"].as_i.in?(start..target) }
+        .select { |item| item["generation"].as_i == target }
         .sort_by { |item| item["generation"].as_i }
         .map_with_index do |item, index|
           OwnerKeyLink.new(
@@ -281,8 +217,20 @@ module Tinrelay
             index == 0 ? nil : item["authorization_signature"].as_s
           )
         end
-      return observed unless contact
-      contact.owner_chain + observed[1..]
+      observed
+    end
+
+    private def owner_links_after(document : JSON::Any, generation : Int32,
+                                  target : Int32) : Array(OwnerKeyLink)
+      document["owner_keys"].as_a
+        .select { |item| item["generation"].as_i.in?((generation + 1)..target) }
+        .sort_by { |item| item["generation"].as_i }
+        .map do |item|
+          OwnerKeyLink.new(
+            item["generation"].as_i.to_i, item["public_key"].as_s,
+            item["authorization_signature"]?.try(&.as_s?)
+          )
+        end
     end
 
     private def inspect_document(target : String,
@@ -297,10 +245,10 @@ module Tinrelay
                end
       last_auth_error = nil.as(Error?)
       radios.each do |radio|
-        payload = Canonical.fields(target)
         request = ShipInspection.new(
-          target, radio_auth("ship.inspect", payload, radio: radio)
+          target, unsigned_radio_auth(radio)
         )
+        request.auth = radio_auth("ship.inspect", request.payload, radio: radio)
         begin
           return JSON.parse(remote.post("/v1/ships/inspect", request.to_json))
         rescue ex : Unauthorized | Unavailable

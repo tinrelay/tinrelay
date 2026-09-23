@@ -12,10 +12,7 @@ module Tinrelay
       @sent_directory = File.join(root, "sent")
       @withdrawals_directory = File.join(root, "withdrawals")
       [root, outbox_directory, sent_directory, withdrawals_directory].each do |directory|
-        unless Dir.exists?(directory)
-          Dir.mkdir_p(directory, mode: 0o700)
-        end
-        PrivateStorage.secure(directory, 0o700)
+        PrivateStorage.prepare_directory(directory)
       end
     end
 
@@ -117,8 +114,8 @@ module Tinrelay
       with_lock do
         path = withdrawal_path(transmission_id)
         if File.file?(path)
-          existing = marker_at(path, transmission_id)
-          unless existing.to_json == marker.to_json && File.read(path) == encoded
+          marker_at(path, transmission_id)
+          unless File.read(path) == encoded
             raise Conflict.new("withdrawal marker differs from accepted local fact")
           end
           next
@@ -154,7 +151,7 @@ module Tinrelay
       records = Dir.children(directory).sort.compact_map do |name|
         next unless name.ends_with?(".json")
         transmission_id = File.basename(name, ".json")
-        next unless Outbox::UUID.matches?(transmission_id)
+        next unless Ids::PROTOCOL_UUID.matches?(transmission_id)
         begin
           record_at(File.join(directory, name), transmission_id)
         rescue Error | IO::Error | JSON::ParseException | JSON::SerializableError
@@ -206,16 +203,12 @@ module Tinrelay
       unless transmission.sender_ship == ship && envelope.sender_ship == ship
         raise Error.new("outgoing correspondence belongs to another local ship")
       end
-      unless certificate.ship == transmission.sender_ship &&
-             certificate.generation == transmission.sender_signing_generation &&
-             certificate.owner_generation == owner.generation
+      unless certificate.identifies_sender?(
+               transmission.sender_ship, transmission.sender_signing_generation
+             ) && certificate.owner_generation == owner.generation
         raise Error.new("outgoing authoring evidence does not identify its transmission")
       end
-      unless Crypto.verify(
-               certificate.unsigned_bytes,
-               Crypto.unb64(certificate.owner_signature),
-               Crypto.unb64(owner.public_key)
-             )
+      unless certificate.owner_authorized?(Crypto.unb64(owner.public_key))
         raise Error.new("outgoing radio certificate is not owner-authorized")
       end
       signing_key = Crypto.unb64(certificate.signing_public_key)
@@ -231,13 +224,7 @@ module Tinrelay
              )
         raise Error.new("outgoing relay envelope verification failed")
       end
-      unless transmission.transmission_id == envelope.transmission_id &&
-             transmission.sender_ship == envelope.sender_ship &&
-             transmission.sender_signing_generation == envelope.sender_signing_generation &&
-             transmission.recipient_ship == envelope.recipient_ship &&
-             transmission.recipient_encryption_generation ==
-               envelope.recipient_encryption_generation &&
-             transmission.created_at == envelope.created_at
+      unless transmission.matches_envelope?(envelope)
         raise Error.new("outgoing plaintext and relay envelope routing facts differ")
       end
     rescue ex : Invalid
@@ -253,21 +240,15 @@ module Tinrelay
     end
 
     private def validate_id!(transmission_id : String) : Nil
-      unless Outbox::UUID.matches?(transmission_id)
+      unless Ids::PROTOCOL_UUID.matches?(transmission_id)
         raise Invalid.new("invalid transmission id")
       end
     end
 
     private def with_lock(&block : -> T) : T forall T
       path = File.join(root, "outgoing.lock")
-      File.open(path, "a", perm: 0o600) do |file|
-        PrivateStorage.secure(path, 0o600)
-        file.flock_exclusive
-        begin
-          block.call
-        ensure
-          file.flock_unlock
-        end
+      PrivateStorage.with_lock(path, "a", true) do |_file|
+        block.call
       end
     end
 

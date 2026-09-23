@@ -5,6 +5,15 @@ module Tinrelay
              outgoing : OutgoingStore? = nil,
              observer : OutgoingObserver? = nil) : SignedRelayEnvelope
       reconcile_radio_if_pending!
+      record = build_outgoing_record(recipient, body, from_label, expires_in)
+      store = outgoing || OutgoingStore.new("#{keyring.path}.outgoing", keyring.data.ship)
+      store.store(record)
+      submit_record(record, store, initial: true, observer: observer)
+      record.signed_relay_envelope
+    end
+
+    private def build_outgoing_record(recipient : String, body : String,
+                                      from_label : String?, expires_in : Int64) : OutgoingRecord
       to_label, recipient_ship = Names.coordinate!(recipient)
       from_label.try { |label| Names.label!(label) }
       raise Invalid.new("transmission body is empty") if body.empty?
@@ -48,14 +57,10 @@ module Tinrelay
         Crypto.sign(envelope.signing_bytes, Crypto.unb64(radio.signing.secret_key))
       )
       owner_public_key = authoring_owner_public_key(radio)
-      record = OutgoingRecord.new(
+      OutgoingRecord.new(
         transmission, envelope, radio.certificate,
         OutgoingOwnerEvidence.new(radio.certificate.owner_generation, owner_public_key)
       )
-      store = outgoing || OutgoingStore.new("#{keyring.path}.outgoing", keyring.data.ship)
-      store.store(record)
-      submit_record(record, store, initial: true, observer: observer)
-      envelope
     end
 
     def retry(outgoing : OutgoingStore, transmission_id : String,
@@ -88,10 +93,7 @@ module Tinrelay
       return record if outgoing.withdrawal_requested?(transmission_id)
       reconcile_radio_if_pending!
       envelope = record.signed_relay_envelope
-      placeholder = RadioAuth.new(
-        keyring.data.ship, keyring.data.active_radio_generation, 0_i64
-      )
-      request = TransmissionWithdrawal.new(envelope.transmission_id, placeholder)
+      request = TransmissionWithdrawal.new(envelope.transmission_id, unsigned_radio_auth)
       request.auth = radio_auth("transmission.withdraw", request.payload)
       response_body = begin
         remote.post("/v1/transmissions/withdraw", request.to_json)
@@ -145,9 +147,7 @@ module Tinrelay
                               initial : Bool,
                               observer : OutgoingObserver?) : Nil
       envelope = record.signed_relay_envelope
-      response_body = begin
-        remote.post("/v1/transmissions", envelope.to_json)
-      rescue ex : Invalid | Unauthorized | NotFound | Conflict | Expired | ProtocolMismatch
+      submit_transmission(envelope, envelope.to_json) do
         if initial
           begin
             outgoing.discard_initial(record)
@@ -158,21 +158,6 @@ module Tinrelay
             )
           end
         end
-        raise ex
-      rescue ex : TransmissionLimited
-        raise TransmissionLimited.new(
-          ex.retry_after_seconds, envelope.transmission_id, envelope.sender_ship
-        )
-      rescue ex : Error | IO::Error
-        raise AcceptanceUnknown.new(
-          envelope.transmission_id, envelope.sender_ship, ex.message
-        )
-      end
-      unless accepted_response?(response_body)
-        raise AcceptanceUnknown.new(
-          envelope.transmission_id, envelope.sender_ship,
-          "repeater returned invalid acceptance evidence"
-        )
       end
       begin
         outgoing.settle(envelope.transmission_id)
@@ -187,9 +172,7 @@ module Tinrelay
 
     private def submit_legacy(envelope : SignedRelayEnvelope, encoded : String,
                               outbox : Outbox) : Nil
-      response_body = begin
-        remote.post("/v1/transmissions", encoded)
-      rescue ex : Invalid | Unauthorized | NotFound | Conflict | Expired | ProtocolMismatch
+      submit_transmission(envelope, encoded) do
         begin
           outbox.delete(envelope.transmission_id)
         rescue cleanup : IO::Error
@@ -198,6 +181,23 @@ module Tinrelay
             "could not be removed: #{cleanup.message}"
           )
         end
+      end
+      begin
+        outbox.delete(envelope.transmission_id)
+      rescue ex : IO::Error
+        raise Error.new(
+          "repeater accepted transmission #{envelope.transmission_id}, but its local " +
+          "outbox envelope could not be removed: #{ex.message}"
+        )
+      end
+    end
+
+    private def submit_transmission(envelope : SignedRelayEnvelope, encoded : String,
+                                    &on_rejection : -> Nil) : Nil
+      response_body = begin
+        remote.post("/v1/transmissions", encoded)
+      rescue ex : Invalid | Unauthorized | NotFound | Conflict | Expired | ProtocolMismatch
+        on_rejection.call
         raise ex
       rescue ex : TransmissionLimited
         raise TransmissionLimited.new(
@@ -212,14 +212,6 @@ module Tinrelay
         raise AcceptanceUnknown.new(
           envelope.transmission_id, envelope.sender_ship,
           "repeater returned invalid acceptance evidence"
-        )
-      end
-      begin
-        outbox.delete(envelope.transmission_id)
-      rescue ex : IO::Error
-        raise Error.new(
-          "repeater accepted transmission #{envelope.transmission_id}, but its local " +
-          "outbox envelope could not be removed: #{ex.message}"
         )
       end
     end
@@ -244,11 +236,7 @@ module Tinrelay
                      end || raise(Unauthorized.new("authoring owner key is absent from registry"))
                      owner["public_key"].as_s
                    end
-      unless Crypto.verify(
-               certificate.unsigned_bytes,
-               Crypto.unb64(certificate.owner_signature),
-               Crypto.unb64(public_key)
-             )
+      unless certificate.owner_authorized?(Crypto.unb64(public_key))
         raise Unauthorized.new("authoring radio certificate is invalid")
       end
       mutate_keyring do

@@ -1,8 +1,9 @@
 require "http/client"
 
 require "../platform/private_storage"
+require "../bounded_io"
 require "../protocol"
-require "./local_paths"
+require "../local_paths"
 require "./local_state_migration"
 require "../atomic_private_file"
 require "./remote"

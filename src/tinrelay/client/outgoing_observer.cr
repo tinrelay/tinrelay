@@ -54,10 +54,8 @@ module Tinrelay
 
     private def self.read_config(path : String) : String
       File.open(path) do |file|
-        buffer = IO::Memory.new
-        count = IO.copy(file, buffer, MAX_CONFIG_BYTES + 1)
-        raise ArgumentError.new("observer config exceeds limit") if count > MAX_CONFIG_BYTES
-        buffer.to_s
+        BoundedIO.read(file, MAX_CONFIG_BYTES) ||
+          raise ArgumentError.new("observer config exceeds limit")
       end
     end
 

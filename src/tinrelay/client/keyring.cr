@@ -7,6 +7,10 @@ module Tinrelay
 
     def initialize(@public_key, @secret_key)
     end
+
+    def self.from_raw(public_key : Bytes, secret_key : Bytes) : StoredKeyPair
+      new(Crypto.b64(public_key), Crypto.b64(secret_key))
+    end
   end
 
   class ShipRadioIdentity
@@ -21,6 +25,25 @@ module Tinrelay
 
     def initialize(@generation, @signing, @encryption, @certificate,
                    @retire_after = nil, @owner_public_key = nil)
+    end
+
+    def self.create_signed(ship : String, generation : Int32,
+                           owner_generation : Int32, owner : StoredKeyPair,
+                           issued_at : Int64) : ShipRadioIdentity
+      signing = Crypto.signing_keypair
+      encryption = Crypto.box_keypair
+      certificate = ShipRadioCertificate.new(
+        ship, generation, Crypto.b64(signing.public_key),
+        Crypto.b64(encryption.public_key), issued_at, owner_generation
+      )
+      certificate.owner_signature = Crypto.b64(
+        Crypto.sign(certificate.unsigned_bytes, Crypto.unb64(owner.secret_key))
+      )
+      new(
+        generation, StoredKeyPair.from_raw(signing.public_key, signing.secret_key),
+        StoredKeyPair.from_raw(encryption.public_key, encryption.secret_key),
+        certificate, owner_public_key: owner.public_key
+      )
     end
   end
 
@@ -45,6 +68,15 @@ module Tinrelay
 
     def blocked? : Bool
       !blocked_at.nil?
+    end
+
+    def adopt_verified_identity!(chain : Array(OwnerKeyLink),
+                                 certificate : ShipRadioCertificate) : Nil
+      current_owner = chain.last
+      @owner_chain = chain
+      @owner_generation = current_owner.generation
+      @owner_public_key = current_owner.public_key
+      @radio_certificate = certificate
     end
   end
 
@@ -307,18 +339,9 @@ module Tinrelay
 
     protected def self.synchronize_path(path : String, &)
       directory = File.dirname(path)
-      unless Dir.exists?(directory)
-        Dir.mkdir_p(directory, mode: 0o700)
-      end
-      PrivateStorage.secure(directory, 0o700)
-      File.open("#{path}.lock", "a+", perm: 0o600) do |file|
-        PrivateStorage.secure(file.path, 0o600)
-        file.flock_exclusive
-        begin
-          yield file
-        ensure
-          file.flock_unlock
-        end
+      PrivateStorage.prepare_directory(directory)
+      PrivateStorage.with_lock("#{path}.lock", "a+", true) do |file|
+        yield file
       end
     end
 
@@ -326,30 +349,8 @@ module Tinrelay
                                        ship : String,
                                        owner_file : String, now : Time) : Keyring
       owner_keys = Crypto.signing_keypair
-      signing_keys = Crypto.signing_keypair
-      encryption_keys = Crypto.box_keypair
-      certificate = ShipRadioCertificate.new(
-        ship, 1, Crypto.b64(signing_keys.public_key),
-        Crypto.b64(encryption_keys.public_key), now.to_unix, 1
-      )
-      certificate.owner_signature = Crypto.b64(
-        Crypto.sign(certificate.unsigned_bytes, owner_keys.secret_key)
-      )
-      owner = StoredKeyPair.new(
-        Crypto.b64(owner_keys.public_key), Crypto.b64(owner_keys.secret_key)
-      )
-      radio = ShipRadioIdentity.new(
-        1,
-        StoredKeyPair.new(
-          Crypto.b64(signing_keys.public_key),
-          Crypto.b64(signing_keys.secret_key)
-        ),
-        StoredKeyPair.new(
-          Crypto.b64(encryption_keys.public_key),
-          Crypto.b64(encryption_keys.secret_key)
-        ),
-        certificate, owner_public_key: owner.public_key
-      )
+      owner = StoredKeyPair.from_raw(owner_keys.public_key, owner_keys.secret_key)
+      radio = ShipRadioIdentity.create_signed(ship, 1, 1, owner, now.to_unix)
       keyring = new(
         path, owner_file,
         KeyringData.new(server, ship, owner.public_key, [radio])

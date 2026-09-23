@@ -116,7 +116,7 @@ describe "tinrelay send CLI input" do
       error.should be_empty
       sent = JSON.parse(output)
       sent["state"].as_s.should eq("accepted")
-      sent["transmission_id"].as_s.should match(Tinrelay::Outbox::UUID)
+      sent["transmission_id"].as_s.should match(Tinrelay::Ids::PROTOCOL_UUID)
       sent.as_h.keys.sort.should eq(%w(
         recipient_ship sender_ship state transmission_id
       ))
@@ -147,7 +147,7 @@ describe "tinrelay send CLI input" do
         error.should be_empty
         sent = JSON.parse(output)
         sent["state"].as_s.should eq("accepted")
-        sent["transmission_id"].as_s.should match(Tinrelay::Outbox::UUID)
+        sent["transmission_id"].as_s.should match(Tinrelay::Ids::PROTOCOL_UUID)
 
         event = client.radio_wait(Tinrelay::Spool.new(paths.spool), hold_seconds: 0)
         record = Tinrelay::Spool.new(paths.spool).get(event.kind, event.source_id)
@@ -182,7 +182,7 @@ describe "tinrelay send CLI input" do
           error.should be_empty
           sent = JSON.parse(output)
           sent["state"].as_s.should eq("accepted")
-          sent["transmission_id"].as_s.should match(Tinrelay::Outbox::UUID)
+          sent["transmission_id"].as_s.should match(Tinrelay::Ids::PROTOCOL_UUID)
 
           event = JSON.parse(listener.receive)
           event["contract"].as_s.should eq(Tinrelay::OutgoingObserver::CONTRACT)
@@ -286,7 +286,7 @@ describe "tinrelay sent and withdrawal CLI" do
       send_error.should be_empty
       sent = JSON.parse(send_output)
       transmission_id = sent["transmission_id"].as_s
-      transmission_id.should match(Tinrelay::Outbox::UUID)
+      transmission_id.should match(Tinrelay::Ids::PROTOCOL_UUID)
       sent["state"].as_s.should eq("accepted")
 
       outgoing = Tinrelay::OutgoingStore.new(paths.outgoing, "alpha")

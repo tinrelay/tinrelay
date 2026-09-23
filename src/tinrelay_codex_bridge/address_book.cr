@@ -24,10 +24,8 @@ module TinrelayCodexBridge
 
     private def read
       bytes = File.open(@path) do |file|
-        buffer = IO::Memory.new
-        count = IO.copy(file, buffer, MAX_BYTES + 1)
-        raise Blocked.new("address_book_too_large") if count > MAX_BYTES
-        buffer.to_s
+        Tinrelay::BoundedIO.read(file, MAX_BYTES) ||
+          raise Blocked.new("address_book_too_large")
       end
       JSON.parse(bytes).as_h
     rescue File::Error
@@ -43,7 +41,7 @@ module TinrelayCodexBridge
         raise Blocked.new("invalid_address")
       end
       id = address["threadId"]?.try(&.as_s?) || raise Blocked.new("invalid_address")
-      unless /\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/.matches?(id)
+      unless Tinrelay::Ids::TASK_UUID.matches?(id)
         raise Blocked.new("invalid_address")
       end
       id

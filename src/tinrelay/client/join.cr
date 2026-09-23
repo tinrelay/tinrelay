@@ -29,17 +29,14 @@ module Tinrelay
         end
         keyring.finish_join
         client
-      rescue ex : Invalid | NotFound | Conflict | Expired
-        if candidate = prepared
-          candidate.cleanup_token.try do |token|
-            candidate.keyring.abandon_join(token)
-          end
-        end
-        raise ex
-      rescue ex : ProtocolMismatch | RegistrationLimited | RegistrationUnavailable
-        if candidate = prepared
-          candidate.cleanup_token.try do |token|
-            candidate.keyring.abandon_join(token)
+      rescue ex : Error
+        case ex
+        when Invalid, NotFound, Conflict, Expired, ProtocolMismatch,
+             RegistrationLimited, RegistrationUnavailable
+          if candidate = prepared
+            candidate.cleanup_token.try do |token|
+              candidate.keyring.abandon_join(token)
+            end
           end
         end
         raise ex
@@ -57,20 +54,11 @@ module Tinrelay
         item["generation"].as_i == 1 && item["state"].as_s == "active"
       end
       return false unless owner && radio
-      certificate = ShipRadioCertificate.new(
-        document["ship"].as_s, radio["generation"].as_i.to_i,
-        radio["signing_public_key"].as_s, radio["encryption_public_key"].as_s,
-        radio["issued_at"].as_i64, radio["owner_generation"].as_i.to_i,
-        radio["owner_signature"].as_s
-      )
+      certificate = RegistryEvidence.radio_certificate(document["ship"].as_s, radio)
       expected = keyring.data.radio!(1).certificate
       unless owner["public_key"].as_s == keyring.data.owner_public_key &&
-             certificate.to_json == expected.to_json &&
-             Crypto.verify(
-               certificate.unsigned_bytes,
-               Crypto.unb64(certificate.owner_signature),
-               Crypto.unb64(keyring.data.owner_public_key)
-             )
+             certificate.same_certificate?(expected) &&
+             certificate.owner_authorized?(Crypto.unb64(keyring.data.owner_public_key))
         raise Unauthorized.new("remote claim does not match the provisional ship identity")
       end
       true

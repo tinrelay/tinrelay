@@ -33,12 +33,7 @@ module Tinrelay
       if event = local_radio_event(spool)
         return event
       end
-      reconcile_radio_if_pending!
-      loop do
-        if event = radio_attempt(spool, hold_seconds)
-          return event
-        end
-      end
+      radio_collect_unlocked(spool, hold_seconds)
     end
 
     private def radio_collect_unlocked(spool : Spool,
@@ -64,11 +59,8 @@ module Tinrelay
       known = keyring.data.contacts.to_h do |contact|
         {contact.ship, contact.radio_certificate.generation}
       end
-      placeholder = RadioAuth.new(
-        keyring.data.ship, keyring.data.active_radio_generation, 0_i64
-      )
       request = RadioWaitRequest.new(
-        hold_seconds, placeholder, known
+        hold_seconds, unsigned_radio_auth, known
       )
       request.auth = radio_auth("radio.wait", request.payload)
       response = RadioWaitResponse.from_json(
@@ -120,26 +112,23 @@ module Tinrelay
 
     def acknowledge(transmission_id : String) : Nil
       reconcile_radio_if_pending!
-      request = TransmissionAck.new(
-        transmission_id, radio_auth("transmission.ack", Canonical.fields(transmission_id))
-      )
+      request = TransmissionAck.new(transmission_id, unsigned_radio_auth)
+      request.auth = radio_auth("transmission.ack", request.payload)
       remote.post("/v1/transmissions/ack", request.to_json)
     end
 
     def acknowledge_hail(hail_id : String) : Nil
       reconcile_radio_if_pending!
-      request = HailAck.new(
-        hail_id, radio_auth("hail.ack", Canonical.fields(hail_id))
-      )
+      request = HailAck.new(hail_id, unsigned_radio_auth)
+      request.auth = radio_auth("hail.ack", request.payload)
       remote.post("/v1/hails/ack", request.to_json)
     end
 
     def acknowledge_retune(owner_ship : String, generation : Int32) : Nil
-      payload = Canonical.fields(owner_ship, generation.to_s)
       request = RetuneAck.new(
-        owner_ship, generation,
-        radio_auth("relationship.retune.ack", payload)
+        owner_ship, generation, unsigned_radio_auth
       )
+      request.auth = radio_auth("relationship.retune.ack", request.payload)
       remote.post("/v1/relationships/retune/ack", request.to_json)
     end
 
@@ -196,9 +185,7 @@ module Tinrelay
       validate_signed_transmission!(transmission, envelope, certificate)
       raise Invalid.new("received plaintext exceeds limit") if plaintext.size > MAX_PLAINTEXT_BYTES
       unless self_transmission
-        update_pinned_sender!(
-          envelope, certificate, owner_generation, owner_public, owner_chain
-        )
+        update_pinned_sender!(envelope, certificate, owner_chain)
       end
       record = spool.store_transmission(
         envelope, transmission, certificate, owner_public,
@@ -259,7 +246,7 @@ module Tinrelay
         envelope.sender_signing_generation,
         nil
       )
-      unless certificate.to_json == local_certificate.to_json
+      unless certificate.same_certificate?(local_certificate)
         raise Unauthorized.new(
           "registry radio certificate differs from the local ship identity"
         )
@@ -292,13 +279,7 @@ module Tinrelay
              )
         raise Unauthorized.new("signed transmission signature is invalid")
       end
-      unless transmission.transmission_id == envelope.transmission_id &&
-             transmission.sender_ship == envelope.sender_ship &&
-             transmission.sender_signing_generation == envelope.sender_signing_generation &&
-             transmission.recipient_ship == envelope.recipient_ship &&
-             transmission.recipient_encryption_generation ==
-               envelope.recipient_encryption_generation &&
-             transmission.created_at == envelope.created_at
+      unless transmission.matches_envelope?(envelope)
         raise Unauthorized.new("signed transmission and relay envelope facts differ")
       end
     end
@@ -323,9 +304,7 @@ module Tinrelay
         verified = if certificate.generation < contact.radio_certificate.generation &&
                       delivery.radio_chain.empty? && delivery.owner_chain.empty?
                      unless certificate.owner_generation == contact.owner_generation &&
-                            Crypto.verify(
-                              certificate.unsigned_bytes,
-                              Crypto.unb64(certificate.owner_signature),
+                            certificate.owner_authorized?(
                               Crypto.unb64(contact.owner_public_key)
                             )
                        raise Unauthorized.new(
@@ -341,11 +320,7 @@ module Tinrelay
         contact_state = "known_prior_contact"
         return nil if contact.blocked?
         if verified.generation > contact.radio_certificate.generation
-          contact.owner_chain = owner_chain
-          current_owner = owner_chain.last
-          contact.owner_generation = current_owner.generation
-          contact.owner_public_key = current_owner.public_key
-          contact.radio_certificate = verified
+          contact.adopt_verified_identity!(owner_chain, verified)
         end
       else
         unless delivery.owner_chain.empty?
@@ -354,20 +329,14 @@ module Tinrelay
         owner_public = Crypto.unb64(
           delivery.sender_owner_public_key, "hail sender owner public key"
         )
-        unless Crypto.verify(
-                 certificate.unsigned_bytes,
-                 Crypto.unb64(certificate.owner_signature), owner_public
-               )
+        unless certificate.owner_authorized?(owner_public)
           raise Unauthorized.new("hail radio certificate is not owner-authorized")
         end
         owner_chain << OwnerKeyLink.new(
           certificate.owner_generation, delivery.sender_owner_public_key
         )
       end
-      unless Crypto.verify(
-               hail.signing_bytes, Crypto.unb64(hail.signature),
-               Crypto.unb64(certificate.signing_public_key)
-             )
+      unless hail.signed_by?(Crypto.unb64(certificate.signing_public_key))
         raise Unauthorized.new("hail signature is invalid")
       end
       spool.store_hail(hail, certificate, owner_chain, contact_state)

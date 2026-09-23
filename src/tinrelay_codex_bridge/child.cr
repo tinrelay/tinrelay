@@ -45,13 +45,9 @@ module TinrelayCodexBridge
       channel = Channel(String | Exception).new(1)
       spawn do
         begin
-          buffer = IO::Memory.new
-          scratch = Bytes.new(4096)
-          while (count = io.read(scratch)) > 0
-            raise Blocked.new("tinrelay_output_too_large") if buffer.size + count > MAX_BYTES
-            buffer.write(scratch[0, count])
-          end
-          channel.send(buffer.to_s)
+          bytes = Tinrelay::BoundedIO.read(io, MAX_BYTES) ||
+                  raise Blocked.new("tinrelay_output_too_large")
+          channel.send(bytes)
         rescue ex
           @control.terminate_child
           channel.send(ex)
@@ -144,15 +140,11 @@ module TinrelayCodexBridge
         "radio", "routed", event.kind, event.id, "--ship", @config.ship,
       ])
       raise Blocked.new("tinrelay_routed_failed") unless result.success?
-      value = JSON.parse(output).as_h
+      value, state = response_state(output, event.kind, event.id, "invalid_routed_output")
       unless value.keys.sort == ["kind", "source_id", "state"] &&
-             value["state"].as_s == "routed" &&
-             value["kind"].as_s == event.kind &&
-             value["source_id"].as_s == event.id
+             state == "routed"
         raise Blocked.new("invalid_routed_output")
       end
-    rescue JSON::ParseException | TypeCastError | KeyError
-      raise Blocked.new("invalid_routed_output")
     end
 
     private def status(kind : String, source_id : String)
@@ -160,20 +152,26 @@ module TinrelayCodexBridge
         "radio", "status", kind, source_id, "--ship", @config.ship,
       ])
       raise Blocked.new("tinrelay_status_failed") unless result.success?
-      value = JSON.parse(output)
-      unless value.as_h["source_id"].as_s == source_id &&
-             value.as_h["kind"].as_s == kind &&
-             {"transmission", "hail", "rejected_transmission"}.includes?(kind)
-        raise Blocked.new("invalid_radio_status")
-      end
-      routed = case value.as_h["state"].as_s
+      _, state = response_state(output, kind, source_id, "invalid_radio_status")
+      routed = case state
                when "routed"  then true
                when "pending" then false
                else                raise Blocked.new("invalid_radio_status")
                end
       {routed, kind}
+    end
+
+    private def response_state(output : String, kind : String,
+                               source_id : String, error_code : String)
+      value = JSON.parse(output).as_h
+      unless value["source_id"].as_s == source_id &&
+             value["kind"].as_s == kind &&
+             Tinrelay::Ids::SOURCE_KINDS.includes?(kind)
+        raise Blocked.new(error_code)
+      end
+      {value, value["state"].as_s}
     rescue JSON::ParseException | TypeCastError | KeyError
-      raise Blocked.new("invalid_radio_status")
+      raise Blocked.new(error_code)
     end
 
     private def optional_string(value : JSON::Any?) : String?

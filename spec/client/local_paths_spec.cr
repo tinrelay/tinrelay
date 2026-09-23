@@ -15,6 +15,12 @@ describe Tinrelay::LocalPaths do
     paths.spool.should eq(File.join(data, "inbox"))
     paths.outbox.should eq(File.join(data, "outbox"))
     paths.outgoing.should eq(File.join(data, "outgoing"))
+    paths.codex_addresses.should eq(File.join(config, "codex-addresses.json"))
+    paths.local_delivery_lock.should eq(File.join(data, "inbox", "local-delivery.lock"))
+    paths.pending_target.should eq(
+      File.join("/home/caller", ".local", "share", "tinrelay-codex-bridge",
+        "pending", "harbor.json")
+    )
   end
 
   it "rejects a ship name before using it as a path component" do

@@ -113,7 +113,7 @@ describe Tinrelay::LocalStateMigration do
       target = File.join(
         home, ".local", "share", "tinrelay-codex-bridge", "pending", "alpha.json"
       )
-      task_id = Tinrelay::Ids.uuid
+      task_id = "019a6d13-2f40-7b21-8c59-5a9d23f11e70"
       Tinrelay::AtomicPrivateFile.write(
         target,
         {
@@ -131,7 +131,7 @@ describe Tinrelay::LocalStateMigration do
       File.write(transmission_old_path, JSON::Any.new(corrupt).to_pretty_json + '\n')
       expect_raises(
         Tinrelay::Error, "inbox signed transmission verification failed"
-      ) { Tinrelay::LocalStateMigration.new(paths, home, "alpha").run }
+      ) { Tinrelay::LocalStateMigration.new(paths).run }
       File.exists?(transmission_old_path).should be_true
       JSON.parse(File.read(target))["local_id"].as_s.should eq(transmission_old_id)
       File.write(transmission_old_path, valid_legacy_bytes)
@@ -140,7 +140,7 @@ describe Tinrelay::LocalStateMigration do
         Tinrelay::Invalid, "local inbox format requires `tinrelay migrate`"
       ) { Tinrelay::Spool.open_existing(paths.spool).list }
 
-      Tinrelay::LocalStateMigration.new(paths, home, "alpha").run
+      Tinrelay::LocalStateMigration.new(paths).run
 
       File.exists?(transmission_old_path).should be_false
       File.exists?(hail_old_path).should be_false
@@ -159,7 +159,7 @@ describe Tinrelay::LocalStateMigration do
         "state"     => JSON::Any.new("receipt_unknown"),
       })
       before = TinrelayLocalStateMigrationSpec.json_snapshot(home)
-      Tinrelay::LocalStateMigration.new(paths, home, "alpha").run
+      Tinrelay::LocalStateMigration.new(paths).run
       TinrelayLocalStateMigrationSpec.json_snapshot(home).should eq(before)
       hail_old_id.should_not eq(transmission_old_id)
     end
@@ -190,7 +190,7 @@ describe Tinrelay::LocalStateMigration do
 
     expect_raises(
       Tinrelay::Invalid, "bridge pending target has no matching inbox record"
-    ) { Tinrelay::LocalStateMigration.new(paths, home, "alpha").run }
+    ) { Tinrelay::LocalStateMigration.new(paths).run }
     File.read(old_path).should eq(old_bytes)
     Dir.glob(Path.new(File.join(paths.spool, "**", "*.json")).to_posix)
       .should eq([old_path])
@@ -210,7 +210,7 @@ describe Tinrelay::LocalStateMigration do
         lock.flock_exclusive
         expect_raises(
           Tinrelay::Conflict, "local TinRelay delivery must stop before migration"
-        ) { Tinrelay::LocalStateMigration.new(paths, home, "alpha").run }
+        ) { Tinrelay::LocalStateMigration.new(paths).run }
       end
     end
   ensure

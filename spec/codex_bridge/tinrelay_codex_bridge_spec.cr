@@ -118,8 +118,28 @@ describe Config do
         "/home/operator", ".config", "tinrelay", "fixture", "codex-addresses.json"
       )
     )
+    config.local_delivery_lock_path.should eq(
+      File.join(
+        "/home/operator", ".local", "share", "tinrelay", "fixture",
+        "inbox", "local-delivery.lock"
+      )
+    )
+    config.pending_target_path.should eq(
+      File.join(
+        "/home/operator", ".local", "share", "tinrelay-codex-bridge",
+        "pending", "fixture.json"
+      )
+    )
+    TinrelayCodexBridge::VERSION.should eq(Tinrelay::VERSION)
     config.timeout.should eq(60.seconds)
     config.deref?.should be_true
+  end
+
+  it "keeps the bridge's invalid-ship error at its boundary" do
+    executable = Process.find_executable("true").not_nil!
+    expect_raises(Blocked, "invalid_ship") do
+      Config.new("../fixture", executable, home: "/home/operator")
+    end
   end
 
   it "accepts a custom discovery timeout and pointer delivery" do

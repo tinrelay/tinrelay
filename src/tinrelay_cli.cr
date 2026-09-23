@@ -1,8 +1,11 @@
 require "./tinrelay/client/runtime"
 require "./tinrelay/client/body_input"
+require "./tinrelay/cli_arguments"
 
 module Tinrelay
   module CLI
+    extend CLIArguments
+
     def self.run(argv : Array(String)) : Nil
       selected_ship = extract_unique(argv, "--ship")
       command = argv.shift? || "help"
@@ -21,7 +24,7 @@ module Tinrelay
       case command
       when "migrate"
         no_extra!(argv)
-        LocalStateMigration.new(paths, home, ship).run
+        LocalStateMigration.new(paths).run
         puts({state: "current", ship: ship}.to_json)
       when "join"
         server = required(argv, "--server")
@@ -374,25 +377,9 @@ module Tinrelay
       STDERR.flush
     end
 
-    private def self.extract(argv : Array(String), name : String) : String?
-      index = argv.index(name)
-      return nil unless index
-      raise Invalid.new("#{name} requires a value") unless index + 1 < argv.size
-      argv.delete_at(index)
-      argv.delete_at(index)
-    end
-
     private def self.extract_unique(argv : Array(String), name : String) : String?
       raise Invalid.new("#{name} may be provided only once") if argv.count(name) > 1
       extract(argv, name)
-    end
-
-    private def self.required(argv, name) : String
-      extract(argv, name) || raise Invalid.new("#{name} is required")
-    end
-
-    private def self.no_extra!(argv) : Nil
-      raise Invalid.new("unexpected arguments: #{argv.join(' ')}") unless argv.empty?
     end
 
     private def self.home : String

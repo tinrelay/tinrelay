@@ -3,8 +3,10 @@ require "base64"
 require "digest/sha256"
 require "uri"
 
+require "./ids"
 require "./version"
 require "./error"
+require "./names"
 require "./crypto"
 require "./model"
 
@@ -26,8 +28,6 @@ module Tinrelay
   end
 
   module RejectionEvidence
-    ID = /\Atr_[0-9a-f]{32}\z/
-
     def self.id(transmission_id : String, reason : String) : String
       digest = Digest::SHA256.hexdigest(
         Canonical.fields(

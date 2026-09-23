@@ -15,20 +15,18 @@ module Tinrelay
       end
     end
 
-    def initialize(@paths : LocalPaths, @home : String, @ship : String)
+    def initialize(@paths : LocalPaths)
     end
 
     def run : Nil
       spool_root = @paths.spool
-      pending_target = File.join(
-        @home, ".local", "share", "tinrelay-codex-bridge", "pending", "#{@ship}.json"
-      )
+      pending_target = @paths.pending_target
       return unless Dir.exists?(spool_root) || File.file?(pending_target)
       unless Dir.exists?(spool_root)
         raise Invalid.new("TinRelay inbox is missing for bridge recovery state")
       end
 
-      with_lock(File.join(spool_root, "local-delivery.lock")) do
+      with_lock(@paths.local_delivery_lock) do
         with_lock(File.join(spool_root, "radio-wait.lock")) do
           conversions = conversions(spool_root)
           identity_by_old_id = identity_map(spool_root, conversions)
@@ -130,7 +128,7 @@ module Tinrelay
         add_identity!(identities, item.old_id, item.kind, item.source_id)
       end
       {"pending", "routed"}.each do |state|
-        Spool::KINDS.each do |kind|
+        Ids::SOURCE_KINDS.each do |kind|
           directory = File.join(root, state, kind)
           next unless Dir.exists?(directory)
           Dir.children(directory).each do |name|
@@ -172,7 +170,7 @@ module Tinrelay
                  raise(Invalid.new("bridge pending target has no matching inbox record"))
       state = value["state"]?.try(&.as_s) || "ready"
       unless {"ready", "delivered", "receipt_unknown"}.includes?(state) &&
-             Outbox::UUID.matches?(value["task_id"].as_s)
+             Ids::TASK_UUID.matches?(value["task_id"].as_s)
         raise Invalid.new("bridge pending target is not migratable")
       end
       {
@@ -186,7 +184,7 @@ module Tinrelay
     private def validate_records(root, conversions)
       spool = Spool.open_existing(root)
       destinations = {} of String => String
-      Spool::KINDS.each do |kind|
+      Ids::SOURCE_KINDS.each do |kind|
         {"pending", "routed"}.each do |state|
           directory = File.join(root, state, kind)
           next unless Dir.exists?(directory)
@@ -227,8 +225,7 @@ module Tinrelay
 
     private def apply(conversions, pending_target, target_bytes)
       conversions.each do |item|
-        Dir.mkdir_p(File.dirname(item.new_path), mode: 0o700)
-        PrivateStorage.secure(File.dirname(item.new_path), 0o700)
+        PrivateStorage.prepare_directory(File.dirname(item.new_path))
         if File.file?(item.new_path)
           unless File.read(item.new_path) == item.bytes
             raise Conflict.new("migrated inbox destination differs")
@@ -244,15 +241,11 @@ module Tinrelay
       end
     end
 
-    private def with_lock(path, &)
-      File.open(path, "a", perm: 0o600) do |file|
-        PrivateStorage.secure(path, 0o600)
-        begin
-          file.flock_exclusive(false)
-        rescue IO::Error
-          raise Conflict.new("local TinRelay delivery must stop before migration")
-        end
-        yield
+    private def with_lock(path, &block : -> T) : T forall T
+      PrivateStorage.with_lock(
+        path, "a", false, Conflict.new("local TinRelay delivery must stop before migration")
+      ) do |_file|
+        block.call
       end
     end
   end

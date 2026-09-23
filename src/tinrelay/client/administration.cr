@@ -55,7 +55,7 @@ module Tinrelay
       certificate = identity.certificate
       provisional = RelationshipClose.new(
         peer, retained, certificate, prior_signature,
-        owner_auth("relationship.close", Bytes.empty)
+        unsigned_owner_auth
       )
       provisional.auth = owner_auth("relationship.close", provisional.payload)
       begin
@@ -90,10 +90,10 @@ module Tinrelay
         raise Unauthorized.new("contact is locally blocked") if prior.try(&.blocked?)
         verify_hail_record!(record, prior)
       end
-      payload = Canonical.fields(peer, record.hail_id)
       request = RelationshipAllow.new(
-        peer, record.hail_id, radio_auth("relationship.allow", payload)
+        peer, record.hail_id, unsigned_radio_auth
       )
+      request.auth = radio_auth("relationship.allow", request.payload)
       remote.post("/v1/relationships/allow", request.to_json)
       mutate_keyring do
         prior = keyring.data.contacts.find { |contact| contact.ship == peer }
@@ -134,16 +134,11 @@ module Tinrelay
         fresh_identity = pending.nil?
         unless pending
           keys = Crypto.signing_keypair
-          pending = StoredKeyPair.new(
-            Crypto.b64(keys.public_key), Crypto.b64(keys.secret_key)
-          )
+          pending = StoredKeyPair.from_raw(keys.public_key, keys.secret_key)
           owner.pending_generation = generation
           owner.pending_key = pending
         end
-        bytes = Canonical.fields(
-          "tinrelay-owner-rotation-v1", keyring.data.ship,
-          generation.to_s, pending.public_key
-        )
+        bytes = OwnerKeyLink.rotation_bytes(keyring.data.ship, generation, pending.public_key)
         signature = Crypto.b64(
           Crypto.sign(bytes, Crypto.unb64(owner.key.secret_key))
         )
@@ -152,7 +147,7 @@ module Tinrelay
       new_public = pending_key.public_key
       provisional = OwnerRotation.new(
         new_generation, new_public, prior_signature,
-        owner_auth("owner.rotate", Bytes.empty)
+        unsigned_owner_auth
       )
       provisional.auth = owner_auth("owner.rotate", provisional.payload)
       begin
@@ -179,7 +174,7 @@ module Tinrelay
 
     def ship_change(operation : String) : Nil
       sync_owner!
-      provisional = ShipChange.new(operation, owner_auth("ship.change", Bytes.empty))
+      provisional = ShipChange.new(operation, unsigned_owner_auth)
       provisional.auth = owner_auth("ship.change", provisional.payload)
       remote.post("/v1/ships/change", provisional.to_json)
     end
@@ -196,6 +191,10 @@ module Tinrelay
         Crypto.sign(auth.signing_bytes(action, payload), Crypto.unb64(owner.key.secret_key))
       )
       auth
+    end
+
+    private def unsigned_owner_auth : OwnerAuth
+      OwnerAuth.new(keyring.data.ship, keyring.data.owner_generation, 0_i64, 0_i64)
     end
 
     private def sync_owner! : Bool
@@ -242,27 +241,9 @@ module Tinrelay
     private def build_pending_radio!(prior : ShipRadioIdentity,
                                      owner : OwnerKeyData) : ShipRadioIdentity
       generation = prior.generation + 1
-      signing = Crypto.signing_keypair
-      encryption = Crypto.box_keypair
-      certificate = ShipRadioCertificate.new(
-        keyring.data.ship, generation, Crypto.b64(signing.public_key),
-        Crypto.b64(encryption.public_key), Time.utc.to_unix,
-        keyring.data.owner_generation
-      )
-      certificate.owner_signature = Crypto.b64(
-        Crypto.sign(
-          certificate.unsigned_bytes, Crypto.unb64(owner.key.secret_key)
-        )
-      )
-      identity = ShipRadioIdentity.new(
-        generation,
-        StoredKeyPair.new(
-          Crypto.b64(signing.public_key), Crypto.b64(signing.secret_key)
-        ),
-        StoredKeyPair.new(
-          Crypto.b64(encryption.public_key), Crypto.b64(encryption.secret_key)
-        ),
-        certificate, owner_public_key: owner.key.public_key
+      identity = ShipRadioIdentity.create_signed(
+        keyring.data.ship, generation, keyring.data.owner_generation,
+        owner.key, Time.utc.to_unix
       )
       keyring.data.pending_radio = identity
       identity

@@ -1,7 +1,5 @@
 module Tinrelay
   class Outbox
-    UUID = /\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/
-
     getter directory : String
 
     def initialize(@directory)
@@ -34,7 +32,7 @@ module Tinrelay
       Dir.children(directory).sort.compact_map do |name|
         next unless name.ends_with?(".json")
         id = File.basename(name, ".json")
-        next unless UUID.matches?(id)
+        next unless Ids::PROTOCOL_UUID.matches?(id)
         read(id)[0]
       end
     end
@@ -49,7 +47,7 @@ module Tinrelay
       removed = 0
       Dir.each_child(directory) do |name|
         next unless name.ends_with?(".json")
-        next unless UUID.matches?(File.basename(name, ".json"))
+        next unless Ids::PROTOCOL_UUID.matches?(File.basename(name, ".json"))
         file = File.join(directory, name)
         begin
           envelope = SignedRelayEnvelope.from_json(File.read(file))
@@ -64,15 +62,12 @@ module Tinrelay
     end
 
     private def path(id : String) : String
-      raise Invalid.new("invalid transmission id") unless UUID.matches?(id)
+      raise Invalid.new("invalid transmission id") unless Ids::PROTOCOL_UUID.matches?(id)
       File.join(directory, "#{id}.json")
     end
 
     private def ensure_directory : Nil
-      unless Dir.exists?(directory)
-        Dir.mkdir_p(directory, mode: 0o700)
-      end
-      PrivateStorage.secure(directory, 0o700)
+      PrivateStorage.prepare_directory(directory)
     end
   end
 end

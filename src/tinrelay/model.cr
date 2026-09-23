@@ -1,30 +1,4 @@
 module Tinrelay
-  module Names
-    SHIP  = /\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/
-    LABEL = /\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/
-
-    def self.ship!(value : String) : String
-      raise Invalid.new("invalid ship name") unless SHIP.matches?(value)
-      value
-    end
-
-    def self.label!(value : String) : String
-      raise Invalid.new("invalid local attention label") unless LABEL.matches?(value)
-      value
-    end
-
-    def self.attention!(value : String) : String
-      return value if value.empty?
-      label!(value)
-    end
-
-    def self.coordinate!(value : String) : Tuple(String, String)
-      parts = value.split('@')
-      raise Invalid.new("coordinate must be local-label@ship") unless parts.size == 2
-      {attention!(parts[0]), ship!(parts[1])}
-    end
-  end
-
   class ShipRadioCertificate
     include JSON::Serializable
 
@@ -58,6 +32,24 @@ module Tinrelay
         issued_at.to_s, owner_generation.to_s, owner_signature
       )
     end
+
+    def identifies_sender?(ship : String, generation : Int32) : Bool
+      @ship == ship && @generation == generation
+    end
+
+    def owner_authorized?(owner_public_key : Bytes) : Bool
+      Crypto.verify(
+        unsigned_bytes, Crypto.unb64(owner_signature), owner_public_key
+      )
+    end
+
+    def same_certificate?(other : ShipRadioCertificate) : Bool
+      ship == other.ship && generation == other.generation &&
+        signing_public_key == other.signing_public_key &&
+        encryption_public_key == other.encryption_public_key &&
+        issued_at == other.issued_at && owner_generation == other.owner_generation &&
+        owner_signature == other.owner_signature
+    end
   end
 
   class OwnerKeyLink
@@ -68,6 +60,31 @@ module Tinrelay
     property authorization_signature : String?
 
     def initialize(@generation, @public_key, @authorization_signature = nil)
+    end
+
+    def self.rotation_bytes(ship : String, generation : Int32,
+                            public_key : String) : Bytes
+      Canonical.fields(
+        "tinrelay-owner-rotation-v1", ship, generation.to_s, public_key
+      )
+    end
+
+    def self.continuity_issue(ship : String, anchor : OwnerKeyLink,
+                              links : Array(OwnerKeyLink)) : String?
+      previous = anchor
+      links.each do |link|
+        return "is incomplete" unless link.generation == previous.generation + 1
+        signature = link.authorization_signature ||
+                    return "lacks an authorization"
+        unless Crypto.verify(
+                 rotation_bytes(ship, link.generation, link.public_key),
+                 Crypto.unb64(signature), Crypto.unb64(previous.public_key)
+               )
+          return "has invalid authorization"
+        end
+        previous = link
+      end
+      nil
     end
   end
 
@@ -139,6 +156,15 @@ module Tinrelay
                    @body, @from_label = nil,
                    @signature = "", @protocol = PROTOCOL,
                    @object_version = 1)
+    end
+
+    def matches_envelope?(envelope : SignedRelayEnvelope) : Bool
+      transmission_id == envelope.transmission_id &&
+        sender_ship == envelope.sender_ship &&
+        sender_signing_generation == envelope.sender_signing_generation &&
+        recipient_ship == envelope.recipient_ship &&
+        recipient_encryption_generation == envelope.recipient_encryption_generation &&
+        created_at == envelope.created_at
     end
 
     def signing_bytes : Bytes
@@ -228,6 +254,10 @@ module Tinrelay
         sender_signing_generation.to_s, recipient_ship, created_at.to_s,
         expires_at.to_s
       )
+    end
+
+    def signed_by?(radio_public_key : Bytes) : Bool
+      Crypto.verify(signing_bytes, Crypto.unb64(signature), radio_public_key)
     end
 
     def submission_evidence

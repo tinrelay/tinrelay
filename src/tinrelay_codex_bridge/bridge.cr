@@ -1,12 +1,15 @@
 require "json"
 require "option_parser"
 require "codex_bridge"
+require "../tinrelay/ids"
+require "../tinrelay/local_paths"
+require "../tinrelay/version"
+require "../tinrelay/bounded_io"
 require "../tinrelay/platform/private_storage"
 require "./child_lifetime"
 
 module TinrelayCodexBridge
-  VERSION     = "0.3.0"
-  SOURCE_UUID = /\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/
+  VERSION = Tinrelay::VERSION
 
   class Blocked < Exception; end
 
@@ -107,14 +110,13 @@ module TinrelayCodexBridge
       @deref = true,
     )
       raise Blocked.new("invalid_timeout") if @timeout < 0.seconds
-      unless /\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/.matches?(ship)
+      unless Tinrelay::Names::SHIP.matches?(ship)
         raise Blocked.new("invalid_ship")
       end
+      @paths = Tinrelay::LocalPaths.new(ship, home)
       @tinrelay = Process.find_executable(tinrelay) ||
                   raise Blocked.new("tinrelay_executable_unavailable")
-      @routing_file = routing_file || File.join(
-        home, ".config", "tinrelay", ship, "codex-addresses.json"
-      )
+      @routing_file = routing_file || @paths.codex_addresses
       if routing_file && !Path.new(routing_file).absolute?
         raise Blocked.new("routing_file_must_be_absolute")
       end
@@ -125,11 +127,11 @@ module TinrelayCodexBridge
     end
 
     def local_delivery_lock_path
-      File.join(home, ".local", "share", "tinrelay", ship, "inbox", "local-delivery.lock")
+      @paths.local_delivery_lock
     end
 
     def pending_target_path
-      File.join(home, ".local", "share", "tinrelay-codex-bridge", "pending", "#{ship}.json")
+      @paths.pending_target
     end
   end
 
@@ -151,15 +153,10 @@ module TinrelayCodexBridge
       end
       id = value.as_h["source_id"].as_s
       kind = value.as_h["kind"].as_s
-      unless {"transmission", "hail", "rejected_transmission"}.includes?(kind)
+      unless Tinrelay::Ids::SOURCE_KINDS.includes?(kind)
         raise Blocked.new("invalid_event_kind")
       end
-      valid_id = if kind == "rejected_transmission"
-                   /\Atr_[0-9a-f]{32}\z/.matches?(id)
-                 else
-                   SOURCE_UUID.matches?(id)
-                 end
-      raise Blocked.new("invalid_source_id") unless valid_id
+      raise Blocked.new("invalid_source_id") unless Tinrelay::Ids.source?(kind, id)
       wrapper = value.as_h["wrapper"].as_s
       raise Blocked.new("invalid_wrapper") if wrapper.empty?
       name = value.as_h["name"]?

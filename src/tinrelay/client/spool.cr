@@ -1,7 +1,5 @@
 module Tinrelay
   class Spool
-    KINDS = {"transmission", "hail", "rejected_transmission"}
-
     getter root : String
     getter pending : String
     getter routed : String
@@ -15,16 +13,12 @@ module Tinrelay
       @routed = File.join(root, "routed")
       if create_directories
         [root, pending, routed].each do |directory|
-          unless Dir.exists?(directory)
-            Dir.mkdir_p(directory, mode: 0o700)
-          end
-          PrivateStorage.secure(directory, 0o700)
+          PrivateStorage.prepare_directory(directory)
         end
         [pending, routed].each do |state_directory|
-          KINDS.each do |kind|
+          Ids::SOURCE_KINDS.each do |kind|
             directory = File.join(state_directory, kind)
-            Dir.mkdir_p(directory, mode: 0o700) unless Dir.exists?(directory)
-            PrivateStorage.secure(directory, 0o700)
+            PrivateStorage.prepare_directory(directory)
           end
         end
       end
@@ -77,18 +71,8 @@ module Tinrelay
     end
 
     private def with_lock(path : String, conflict : String, &block : -> T) : T forall T
-      File.open(path, "a", perm: 0o600) do |file|
-        PrivateStorage.secure(path, 0o600)
-        begin
-          file.flock_exclusive(false)
-        rescue IO::Error
-          raise Conflict.new(conflict)
-        end
-        begin
-          block.call
-        ensure
-          file.flock_unlock
-        end
+      PrivateStorage.with_lock(path, "a", false, Conflict.new(conflict)) do |_file|
+        block.call
       end
     end
 
@@ -259,7 +243,7 @@ module Tinrelay
     private def each_record_in(directory : String) : Array(SpoolRecord)
       ensure_current_layout!(directory)
       records = [] of SpoolRecord
-      KINDS.each do |kind|
+      Ids::SOURCE_KINDS.each do |kind|
         kind_directory = File.join(directory, kind)
         next unless Dir.exists?(kind_directory)
         Dir.children(kind_directory).sort.each do |name|
@@ -336,39 +320,21 @@ module Tinrelay
       certificate = record.sender_radio_certificate
       owner_chain = record.sender_owner_chain
       raise Error.new("inbox transmission lacks its owner chain") if owner_chain.empty?
-      current_owner = owner_chain.first
-      owner_chain.each_with_index do |link, index|
-        next if index == 0
-        unless link.generation == current_owner.generation + 1
-          raise Error.new("inbox owner chain skips a generation")
-        end
-        authorization = link.authorization_signature ||
-                        raise Error.new("inbox owner chain lacks an authorization")
-        bytes = Canonical.fields(
-          "tinrelay-owner-rotation-v1", transmission.sender_ship,
-          link.generation.to_s, link.public_key
-        )
-        unless Crypto.verify(
-                 bytes, Crypto.unb64(authorization),
-                 Crypto.unb64(current_owner.public_key)
-               )
-          raise Error.new("inbox owner chain authorization failed")
-        end
-        current_owner = link
+      if reason = OwnerKeyLink.continuity_issue(
+           transmission.sender_ship, owner_chain.first, owner_chain[1..]
+         )
+        raise Error.new("inbox owner chain #{reason}")
       end
+      current_owner = owner_chain.last
       unless current_owner.generation == certificate.owner_generation
         raise Error.new("inbox owner chain does not reach the signing certificate")
       end
-      unless certificate.ship == transmission.sender_ship &&
-             certificate.generation == transmission.sender_signing_generation &&
-             certificate.owner_generation == current_owner.generation
+      unless certificate.identifies_sender?(
+               transmission.sender_ship, transmission.sender_signing_generation
+             ) && certificate.owner_generation == current_owner.generation
         raise Error.new("inbox signing evidence does not identify the signed transmission")
       end
-      unless Crypto.verify(
-               certificate.unsigned_bytes,
-               Crypto.unb64(certificate.owner_signature),
-               Crypto.unb64(current_owner.public_key)
-             )
+      unless certificate.owner_authorized?(Crypto.unb64(current_owner.public_key))
         raise Error.new("inbox signing certificate is not owner-authorized")
       end
       unless Crypto.verify(
@@ -401,13 +367,8 @@ module Tinrelay
     end
 
     private def validate_identity!(kind : String, source_id : String) : Nil
-      raise Invalid.new("invalid inbox evidence kind") unless KINDS.includes?(kind)
-      valid = if kind == "rejected_transmission"
-                RejectionEvidence::ID.matches?(source_id)
-              else
-                Outbox::UUID.matches?(source_id)
-              end
-      raise Invalid.new("invalid inbox source id") unless valid
+      raise Invalid.new("invalid inbox evidence kind") unless Ids::SOURCE_KINDS.includes?(kind)
+      raise Invalid.new("invalid inbox source id") unless Ids.source?(kind, source_id)
     end
   end
 end

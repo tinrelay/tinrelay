@@ -47,23 +47,16 @@ module TinrelayCodexBridge
       end
     end
 
-    private def with_lock(path, error, &)
+    private def with_lock(path, error, &block : -> T) : T forall T
       directory = File.dirname(path)
-      Dir.mkdir_p(directory, mode: 0o700)
-      Tinrelay::PrivateStorage.secure(directory, 0o700)
-      File.open(path, "a", perm: 0o600) do |lock|
-        Tinrelay::PrivateStorage.secure(path, 0o600)
-        begin
-          lock.flock_exclusive(false)
-        rescue IO::Error
-          raise error
-        end
-        yield
+      Tinrelay::PrivateStorage.prepare_directory(directory)
+      Tinrelay::PrivateStorage.with_lock(path, "a", false, error) do |_file|
+        block.call
       end
     end
 
     private def deliver(event, pending : PendingTargetBinding?)
-      if pending && (pending.kind != event.kind || pending.source_id != event.id)
+      if pending && !pending.identifies?(event.kind, event.id)
         unless @child.routed?(pending.kind, pending.source_id)
           raise Blocked.new("pending_target_conflict")
         end

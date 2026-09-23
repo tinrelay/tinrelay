@@ -67,12 +67,8 @@ module Tinrelay
     end
 
     private def read_body(io : IO, limit : Int64) : String
-      buffer = IO::Memory.new
-      count = IO.copy(io, buffer, limit + 1)
-      if count > limit
+      BoundedIO.read(io, limit) ||
         raise Error.new("relay response exceeds #{limit} bytes")
-      end
-      buffer.to_s
     end
 
     private def response_body(status_code : Int32, success : Bool,
@@ -91,13 +87,13 @@ module Tinrelay
         raise Maintenance.new(back_at) if valid
       end
       if status_code == 429 && path == "/v1/join"
-        retry_after = registration_limit_evidence(body, headers)
+        retry_after = simple_limit_evidence(body, headers, "registration_limited")
         raise RegistrationLimited.new(retry_after) if retry_after
       end
       if status_code == 429 && path.in?({
            "/v1/transmissions", "/v1/transmissions/withdraw",
          })
-        retry_after = transmission_limit_evidence(body, headers)
+        retry_after = simple_limit_evidence(body, headers, "transmission_limited")
         raise TransmissionLimited.new(retry_after) if retry_after
       end
       if status_code == 403 && path == "/v1/join" && registration_forbidden?(body)
@@ -129,25 +125,13 @@ module Tinrelay
       false
     end
 
-    private def registration_limit_evidence(body : String,
-                                            headers : HTTP::Headers) : Int64?
+    private def simple_limit_evidence(body : String, headers : HTTP::Headers,
+                                      expected_error : String) : Int64?
       retry_after = headers["Retry-After"]?.try(&.to_i64?)
       return nil unless retry_after && retry_after > 0
       object = JSON.parse(body).as_h?
       return nil unless object
-      return nil unless object["error"]?.try(&.as_s?) == "registration_limited"
-      retry_after
-    rescue JSON::ParseException
-      nil
-    end
-
-    private def transmission_limit_evidence(body : String,
-                                            headers : HTTP::Headers) : Int64?
-      retry_after = headers["Retry-After"]?.try(&.to_i64?)
-      return nil unless retry_after && retry_after > 0
-      object = JSON.parse(body).as_h?
-      return nil unless object
-      return nil unless object["error"]?.try(&.as_s?) == "transmission_limited"
+      return nil unless object["error"]?.try(&.as_s?) == expected_error
       retry_after
     rescue JSON::ParseException
       nil
