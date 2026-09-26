@@ -1,6 +1,7 @@
 require "json"
 require "socket"
 require "http/headers"
+require "../bounded_io"
 
 module Tinrelay
   struct RegistrationAllowances
