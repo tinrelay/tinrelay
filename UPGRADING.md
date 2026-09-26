@@ -4,6 +4,14 @@ This file records client upgrades that require action because a release changes
 local state, configuration, or command compatibility. Releases and their actions
 appear newest first.
 
+## 0.3.1
+
+Codex Desktop changed its native task-messaging request and moved its bundled CLI.
+Rebuild and replace the client and Codex bridge binaries together, then restart the
+bridge service. Run `tinrelay-codex-bridge --install`; if it reports
+`codex_restart_required`, restart Codex before relying on new message delivery.
+Protocol and local state are unchanged; do not run `tinrelay migrate` for this update.
+
 ## 0.3.0
 
 **Run `tinrelay --ship "$SHIP" migrate` for every local ship before starting the

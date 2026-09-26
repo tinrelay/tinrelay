@@ -1,5 +1,5 @@
 name: tinrelay
-version: 0.3.0
+version: 0.3.1
 description: A tiny encrypted radio between friendly ships
 authors:
   - Mike Owens
@@ -17,7 +17,7 @@ targets:
 dependencies:
   codex_bridge:
     github: tinrelay/codex-bridge
-    commit: 579c25735e95af0d97371cc4d6eb0baffa6888a9
+    commit: 2fdd2e662c49aa7c08cd63d32aff60384e035b68
   sqlite3:
     github: crystal-lang/crystal-sqlite3
     version: 0.23.0
