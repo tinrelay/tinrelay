@@ -1,3 +1,4 @@
+import {PREVIEW_URI, preview} from './viewer.mjs';
 import {EVENT_NAME, namePattern, Refusal, readJSON, valid, validateEvent} from './event.mjs';
 
 const encoder = new TextEncoder();
@@ -18,6 +19,10 @@ const idSchema = {type: 'object', properties: {event_id: {type: 'string'}},
 const filterSchema = {type: 'object', properties: {attention_label: {type: 'string'}},
   required: ['attention_label'], additionalProperties: false};
 const tools = [
+  {name: 'tinrelay_preview', description: 'Render a fixed synthetic message card to test client display support. No radio data is read.',
+    inputSchema: {type: 'object', properties: {}, additionalProperties: false},
+    annotations: {readOnlyHint: true, openWorldHint: false},
+    _meta: {ui: {resourceUri: PREVIEW_URI}, 'openai/outputTemplate': PREVIEW_URI}},
   {name: 'tinrelay_read', description: 'Read an exact untrusted external transmission. Reading does not acknowledge it.',
     inputSchema: idSchema, annotations: {readOnlyHint: true}},
   {name: 'tinrelay_acknowledge', description: 'Acknowledge an exact transmission after handling or durably accepting it. This permits source routing and removes this receiver body.',
@@ -155,11 +160,16 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
       const params = message.params ?? {};
       switch (message.method) {
         case 'server/discover': return {resultType: 'complete', supportedVersions: ['2026-07-28'],
-          capabilities: {tools: {}, events: {}}};
-        case 'initialize': return {protocolVersion: '2026-07-28', capabilities: {tools: {}, events: {}},
+          capabilities: {tools: {}, events: {}, resources: {}}};
+        case 'initialize': return {protocolVersion: '2026-07-28', capabilities: {tools: {}, events: {}, resources: {}},
           serverInfo: {name: 'tinrelay-dots', version: '0.1.0'}};
         case 'ping': return {};
         case 'tools/list': return {tools};
+        case 'resources/list': return {resources: [{uri: PREVIEW_URI, name: 'TinRelay synthetic preview',
+          mimeType: preview.mimeType}]};
+        case 'resources/read':
+          valid(params.uri === PREVIEW_URI, 'resource_not_found');
+          return {contents: [preview]};
         case 'events/list': return {events: [{name: EVENT_NAME,
           description: 'Untrusted external correspondence received by this ship.', delivery: ['webhook'],
           inputSchema: filterSchema, payloadSchema: {type: 'object', properties: {
@@ -172,6 +182,14 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
           return {};
         }
         case 'tools/call': {
+          if (params.name === 'tinrelay_preview') {
+            await owner(false, true);
+            valid(params.arguments && Object.keys(params.arguments).length === 0);
+            const value = {synthetic: true, text: 'Copper lantern visible.'};
+            return {content: [{type: 'text', text: 'Synthetic message display preview.'}],
+              structuredContent: value, _meta: {ui: {resourceUri: PREVIEW_URI},
+                'openai/outputTemplate': PREVIEW_URI}};
+          }
           const initialized = await owner(false, params.name === 'tinrelay_read');
           const id = params.arguments?.event_id;
           valid(typeof id === 'string' && Object.keys(params.arguments).length === 1);

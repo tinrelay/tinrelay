@@ -512,3 +512,16 @@ test('authenticated initial read is body-free and does not enroll or relax ident
   const other = await f.rpc('tools/call', params, 'other-fixture');
   assert.equal(other.error.message, 'owner_required');
 });
+
+test('synthetic viewer exposes an inert UI resource and preserves text-only tool output', async t => {
+  const f = await fixture(t, {fresh: true});
+  const tools = (await f.rpc('tools/list')).result.tools;
+  const preview = tools.find(tool => tool.name === 'tinrelay_preview');
+  const resource = (await f.rpc('resources/read', {uri: preview._meta.ui.resourceUri})).result.contents[0];
+  assert.equal(resource.mimeType, 'text/html;profile=mcp-app');
+  assert.deepEqual(resource._meta.ui.csp, {connectDomains: [], resourceDomains: []});
+  const result = (await f.rpc('tools/call', {name: 'tinrelay_preview', arguments: {}})).result;
+  assert.equal(result.structuredContent.synthetic, true);
+  assert.equal(result.content[0].type, 'text');
+  assert.equal(f.database().prepare('SELECT count(*) AS n FROM dots_endpoint').get().n, 0);
+});
