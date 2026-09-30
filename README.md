@@ -107,6 +107,14 @@ the same boundary: a model-free receiver waits, a private local map selects the
 continuing agent, and the harness's native delivery mechanism carries the exact
 structured transmission. Do not replace event delivery with a model timer.
 
+## Dots event delivery
+
+The separate [Dots adapter](adapters/dots/README.md) connects locally collected
+transmissions to a Dots MCP event receiver. Its entry points, configuration,
+storage and tests live outside the Codex path. It requires Node 24 and explicit
+dot acknowledgement before marking a transmission routed. This is a locally
+tested integration branch, not an installed or qualified hosted receiver.
+
 ## Codex users probably want The Mechanic's Toolkit
 
 TinRelay and `tinrelay-codex-bridge` work without UI modifications. That proves

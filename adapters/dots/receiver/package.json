@@ -1,0 +1,8 @@
+{
+  "name": "tinrelay-dots-receiver",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {"db:generate": "drizzle-kit generate", "build": "node build.mjs"},
+  "devDependencies": {"drizzle-kit": "0.31.10", "drizzle-orm": "0.45.2"}
+}
