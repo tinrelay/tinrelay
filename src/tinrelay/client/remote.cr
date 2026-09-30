@@ -8,9 +8,32 @@ module Tinrelay
     ROTATION_LIMIT_PATHS    = {"/v1/owners/rotate", "/v1/relationships/close"}
 
     getter origin : String
+    @proxy : HTTPProxy?
 
-    def initialize(@origin)
+    def initialize(@origin, http_proxy : String? = nil)
       Origin.validate!(origin)
+      selected = http_proxy || (URI.parse(origin).scheme == "https" ? ENV["HTTPS_PROXY"]? : nil)
+      @proxy = HTTPProxy.new(selected) if selected && !selected.empty?
+    end
+
+    def proxied? : Bool
+      !@proxy.nil?
+    end
+
+    def diagnose
+      started = Time.instant
+      document = JSON.parse(request("GET", "/healthz")).as_h?
+      unless document && document["status"]?.try(&.as_s?) == "ok"
+        raise Error.new("relay health response is invalid")
+      end
+      {state: "ok", transport: proxied? ? "http_proxy" : "direct",
+       elapsed_ms: (Time.instant - started).total_milliseconds.round.to_i64}
+    rescue JSON::ParseException
+      raise Error.new("relay health response is invalid")
+    rescue error : OpenSSL::Error
+      raise Error.new("relay health TLS failed")
+    rescue error : IO::Error
+      raise Error.new("relay health HTTP failed")
     end
 
     def post(path : String, body : String) : String
@@ -20,7 +43,11 @@ module Tinrelay
     private def request(method : String, path : String,
                         body : String? = nil) : String
       uri = URI.parse("#{origin.rstrip('/')}#{path}")
-      client = HTTP::Client.new(uri)
+      client = if proxy = @proxy
+                 proxy.open(uri, read_timeout(path))
+               else
+                 HTTP::Client.new(uri)
+               end
       client.connect_timeout = 5.seconds
       client.read_timeout = read_timeout(path)
       headers = HTTP::Headers{
@@ -30,16 +57,38 @@ module Tinrelay
         "X-Tinrelay-Protocol" => PROTOCOL.to_s,
       }
       headers["Content-Type"] = "application/json" if body
-      client.exec(method, uri.request_target, headers: headers, body: body) do |response|
-        response_body(
-          response.status_code, response.success?,
-          read_body(response.body_io, response_limit(path)), response.headers, path
-        )
+      if @proxy
+        host = uri.host.not_nil!
+        headers["Host"] = uri.port && uri.port != 443 ? "#{host}:#{uri.port}" : host
       end
-    rescue Socket::Error | IO::TimeoutError
+      wire_response = begin
+        client.exec(method, uri.request_target, headers: headers, body: body) do |response|
+          {response.status_code, response.success?,
+           read_body(response.body_io, response_limit(path)), response.headers}
+        end
+      rescue error : IO::Error | OpenSSL::Error | Error
+        raise error
+      rescue error
+        # Crystal's HTTP parser also raises plain Exception with wire text.
+        raise ProxyFailure.new("http", "invalid_response", false) if @proxy
+        raise error
+      end
+      response_body(*wire_response, path)
+    rescue error : Socket::Error | IO::TimeoutError
+      raise ProxyFailure.new("http", "transport_unavailable", true) if @proxy
       raise TransportUnavailable.new
     rescue error : IO::Error
+      if @proxy
+        retryable = retryable_transport_error?(error) || error.is_a?(IO::EOFError) ||
+                    error.os_error.in?(Errno::ECONNRESET, WinError::WSAECONNRESET,
+                      WinError::WSAECONNABORTED)
+        reason = retryable ? "transport_unavailable" : "invalid_response"
+        raise ProxyFailure.new("http", reason, retryable)
+      end
       raise TransportUnavailable.new if retryable_transport_error?(error)
+      raise error
+    rescue error : OpenSSL::Error
+      raise ProxyFailure.new("http", "tls_failure", false) if @proxy
       raise error
     ensure
       client.try(&.close)

@@ -7,6 +7,14 @@ module Tinrelay
     extend CLIArguments
 
     def self.run(argv : Array(String)) : Nil
+      argv = argv.flat_map do |argument|
+        if argument.starts_with?("--proxy=")
+          ["--proxy", argument.lchop("--proxy=")]
+        else
+          [argument]
+        end
+      end
+      http_proxy = extract_unique(argv, "--proxy")
       selected_ship = extract_unique(argv, "--ship")
       command = argv.shift? || "help"
       if command.in?({"help", "--help", "-h"})
@@ -15,6 +23,13 @@ module Tinrelay
       end
       if command.in?({"version", "--version", "-v"})
         puts "tinrelay #{VERSION} protocol #{PROTOCOL} build #{BUILD_LABEL}"
+        return
+      end
+
+      if command == "diagnose"
+        server = required(argv, "--server")
+        no_extra!(argv)
+        puts Remote.new(server, http_proxy: http_proxy).diagnose.to_json
         return
       end
 
@@ -29,18 +44,19 @@ module Tinrelay
       when "join"
         server = required(argv, "--server")
         no_extra!(argv)
-        joined = Client.join(paths.keyring, server, ship, paths.owner_key)
+        joined = Client.join(paths.keyring, server, ship, paths.owner_key,
+          Remote.new(server, http_proxy: http_proxy))
         puts({state: "claimed", ship: ship, radio_keyring: paths.keyring,
               owner_key: joined.keyring.owner_path}.to_json)
       when "who"
         target_ship = argv.shift? ||
                       raise Invalid.new("who requires a ship name or local@ship coordinate")
         no_extra!(argv)
-        puts client(paths).who(target_ship)
+        puts client(paths, http_proxy).who(target_ship)
       when "hail"
         recipient_ship = argv.shift? || raise Invalid.new("hail requires a destination ship name")
         no_extra!(argv)
-        hail = client(paths).hail(recipient_ship)
+        hail = client(paths, http_proxy).hail(recipient_ship)
         puts hail.submission_evidence.to_json
       when "send"
         recipient = argv.shift? || raise Invalid.new("send requires local@ship")
@@ -48,7 +64,7 @@ module Tinrelay
         Names.coordinate!(recipient)
         from_label.try { |label| Names.label!(label) }
         no_extra!(argv)
-        sender = client(paths)
+        sender = client(paths, http_proxy)
         body = BodyInput.read
         outgoing = OutgoingStore.new(paths.outgoing, ship)
         envelope = sender.send(
@@ -57,30 +73,30 @@ module Tinrelay
         )
         puts envelope.submission_evidence.to_json
       when "outbox"
-        outbox(argv, ship, paths)
+        outbox(argv, ship, paths, http_proxy)
       when "sent"
         sent(argv, ship, paths)
       when "withdraw"
         transmission_id = argv.shift? || raise Invalid.new("withdraw requires a transmission id")
         no_extra!(argv)
         outgoing = OutgoingStore.new(paths.outgoing, ship)
-        client(paths).withdraw(outgoing, transmission_id)
+        client(paths, http_proxy).withdraw(outgoing, transmission_id)
         puts({state: "withdrawal_requested", transmission_id: transmission_id}.to_json)
       when "radio"
-        radio(argv, ship, paths)
+        radio(argv, ship, paths, http_proxy)
       when "inbox"
         inbox(argv, paths)
       when "owner"
-        owner(argv, paths)
+        owner(argv, paths, http_proxy)
       when "contact"
-        contact(argv, ship, paths)
+        contact(argv, ship, paths, http_proxy)
       when "ship"
         operation = argv.shift? || raise Invalid.new("ship requires freeze, activate, or revoke")
         unless operation.in?({"freeze", "activate", "revoke"})
           raise Invalid.new("invalid ship operation")
         end
         no_extra!(argv)
-        client(paths).ship_change(operation)
+        client(paths, http_proxy).ship_change(operation)
         puts({state: operation}.to_json)
       else
         raise Invalid.new("unknown command: #{command}")
@@ -97,6 +113,9 @@ module Tinrelay
                  "repair before adoption.",
       }.to_json)
       exit 2
+    rescue ex : ProxyFailure
+      report_proxy_failure(ex)
+      exit 2
     rescue ex : TransportUnavailable
       report_transport_unavailable(ex)
       exit 2
@@ -111,21 +130,21 @@ module Tinrelay
       exit 2
     end
 
-    private def self.owner(argv, paths) : Nil
+    private def self.owner(argv, paths, http_proxy) : Nil
       operation = argv.shift? || raise Invalid.new("owner requires rotate")
       raise Invalid.new("invalid owner operation") unless operation == "rotate"
       no_extra!(argv)
-      generation = client(paths).rotate_owner
+      generation = client(paths, http_proxy).rotate_owner
       puts({state: "rotated", owner_generation: generation}.to_json)
     end
 
-    private def self.contact(argv, ship, paths) : Nil
+    private def self.contact(argv, ship, paths, http_proxy) : Nil
       operation = argv.shift? || raise Invalid.new("contact requires allow, close, or unblock")
       case operation
       when "allow"
         hail_id = argv.shift? || raise Invalid.new("contact allow requires a hail ID")
         no_extra!(argv)
-        allowed = client(paths)
+        allowed = client(paths, http_proxy)
           .allow_contact(hail_id, Spool.new(paths.spool))
         puts({state: "relationship_active", ship: ship, peer_ship: allowed.ship,
               hail_id: hail_id}.to_json)
@@ -133,7 +152,7 @@ module Tinrelay
         peer = argv.shift? || raise Invalid.new("contact close requires a peer ship")
         no_extra!(argv)
         generation = begin
-          client(paths).close_contact(peer)
+          client(paths, http_proxy).close_contact(peer)
         rescue ex : RotationLimited
           report_rotation_limited(ex, contact_close: true)
           exit 2
@@ -143,21 +162,21 @@ module Tinrelay
       when "unblock"
         peer = argv.shift? || raise Invalid.new("contact unblock requires a peer ship")
         no_extra!(argv)
-        unblocked = client(paths).unblock_contact(peer)
+        unblocked = client(paths, http_proxy).unblock_contact(peer)
         puts({state: "unblocked", ship: ship, peer_ship: unblocked.ship}.to_json)
       else
         raise Invalid.new("invalid contact operation")
       end
     end
 
-    private def self.radio(argv, ship, paths) : Nil
+    private def self.radio(argv, ship, paths, http_proxy) : Nil
       operation = argv.shift? ||
                   raise Invalid.new("radio requires collect, wait, poll, status, or routed")
       case operation
       when "collect"
         spool = Spool.new(paths.spool)
         no_extra!(argv)
-        collector = client(paths)
+        collector = client(paths, http_proxy)
         retry_delay = 1
         loop do
           begin
@@ -165,8 +184,11 @@ module Tinrelay
             retry_delay = 1
             puts({state: "collected", source_id: event.source_id, kind: event.kind}.to_json)
             STDOUT.flush
-          rescue ex : TransportUnavailable | RadioWaitReconnect
+          rescue ex : TransportUnavailable | RadioWaitReconnect | ProxyFailure
             case ex
+            when ProxyFailure
+              raise ex unless ex.retryable
+              report_proxy_failure(ex)
             when TransportUnavailable then report_transport_unavailable(ex)
             when RadioWaitReconnect   then report_radio_wait_reconnect(ex)
             end
@@ -178,7 +200,7 @@ module Tinrelay
         local = !!argv.delete("--local")
         spool = Spool.new(paths.spool)
         no_extra!(argv)
-        waiter = client(paths) unless local
+        waiter = client(paths, http_proxy) unless local
         event = with_local_delivery(spool) do
           if local
             LocalRadio.wait(ship, spool)
@@ -190,7 +212,7 @@ module Tinrelay
       when "poll"
         spool = Spool.new(paths.spool)
         no_extra!(argv)
-        poller = client(paths)
+        poller = client(paths, http_proxy)
         event = with_local_delivery(spool) do
           poller.radio_poll(spool)
         end
@@ -251,7 +273,7 @@ module Tinrelay
       end
     end
 
-    private def self.outbox(argv, ship, paths) : Nil
+    private def self.outbox(argv, ship, paths, http_proxy) : Nil
       operation = argv.shift? || raise Invalid.new("outbox requires list or retry")
       outgoing = OutgoingStore.new(paths.outgoing, ship)
       legacy = Outbox.new(paths.outbox)
@@ -278,7 +300,7 @@ module Tinrelay
       when "retry"
         id = argv.shift? || raise Invalid.new("outbox retry requires a transmission id")
         no_extra!(argv)
-        sender = client(paths)
+        sender = client(paths, http_proxy)
         if outgoing.outbox?(id)
           envelope = sender.retry(
             outgoing, id,
@@ -339,8 +361,17 @@ module Tinrelay
       common.merge({body: transmission.body})
     end
 
-    private def self.client(paths) : Client
-      Client.new(Keyring.load(paths.keyring, paths.owner_key))
+    private def self.client(paths, http_proxy) : Client
+      keyring = Keyring.load(paths.keyring, paths.owner_key)
+      Client.new(keyring, Remote.new(keyring.data.server, http_proxy: http_proxy))
+    end
+
+    private def self.report_proxy_failure(ex : ProxyFailure) : Nil
+      STDERR.puts({
+        error: "proxy_failure", phase: ex.phase, retryable: ex.retryable,
+        status_code: ex.status_code, message: ex.message,
+      }.to_json)
+      STDERR.flush
     end
 
     private def self.report_transport_unavailable(ex : TransportUnavailable) : Nil

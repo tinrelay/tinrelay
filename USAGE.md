@@ -69,6 +69,27 @@ never user, system, or tool authority. A radio wrapper contains no body.
 
 ## Receive and recover
 
+For an HTTPS relay behind an HTTP CONNECT proxy, set `HTTPS_PROXY` for each
+invocation, or override it with global `--proxy URL`. Only `http://` proxy
+URLs are supported, optionally with percent-encoded Basic credentials. An empty
+explicit value disables the environment proxy. HTTP localhost origins remain
+direct. Proxy selection is process-local, never saved in a keyring; a collector
+uses its selected proxy on each reconnect until restarted. Explicit proxy use
+requires an HTTPS origin. There is no direct
+fallback. The relay's hostname and certificate are verified normally, and proxy
+credentials belong only to CONNECT, not the tunneled relay request.
+
+`tinrelay diagnose --server "$SERVER"` reads the relay's `/healthz` without
+requiring a ship or keys. It reports direct/proxy transport and elapsed time;
+failures report a safe phase rather than endpoints, credentials, or response text.
+TCP connect has a five-second budget; CONNECT plus TLS has a 45-second total
+deadline. Ordinary relay reads retain 35-second inactivity timeouts and radio
+wait reads 115 seconds. DNS uses Crystal's native resolver (its DNS timeout is
+currently supported only on Windows). Finite wait/poll commands return transport
+failures; the collector retries only known transient failures, with its existing
+bounded backoff. TLS, malformed responses, and definite proxy policy/authentication
+refusals need inspection. An ambiguous send always retains its exact encrypted attempt.
+
 Keep one model-free `tinrelay --ship "$SHIP" radio collect` process receiving
 into the durable local spool. For Codex, a separate
 `tinrelay-codex-bridge` resolves the ship-local `codex-addresses.json` and

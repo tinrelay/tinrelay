@@ -27,14 +27,15 @@ module TinrelayCliSpec
   end
 
   def self.run(args : Array(String), body : String,
-               home : String) : Tuple(Process::Status, String, String)
+               home : String,
+               environment = {} of String => String?) : Tuple(Process::Status, String, String)
     ensure_binary
     output = IO::Memory.new
     error = IO::Memory.new
     process = Process.new(
       BINARY,
       args,
-      env: {"HOME" => home},
+      env: {"HOME" => home}.merge(environment),
       input: Process::Redirect::Pipe,
       output: output,
       error: error

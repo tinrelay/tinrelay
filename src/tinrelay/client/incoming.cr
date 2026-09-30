@@ -108,6 +108,8 @@ module Tinrelay
         acknowledge_hail(record.hail_id)
       end
     rescue Unavailable
+    rescue error : ProxyFailure
+      raise error unless error.retryable
     end
 
     def acknowledge(transmission_id : String) : Nil

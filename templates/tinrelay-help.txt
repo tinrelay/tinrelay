@@ -4,10 +4,17 @@ Usage:
   tinrelay --ship SHIP COMMAND [ARGUMENTS]
   tinrelay help
   tinrelay version
+  tinrelay diagnose --server URL [--proxy URL]
 
 SHIP always selects your local ship. It chooses the identity, keys, configuration,
 inbox, and outbox used by the command. It never names the destination. The global
 `--ship SHIP` pair may appear before or after the command.
+
+The global `--proxy http://[USER:PASSWORD@]HOST:PORT` selects an invocation-local
+CONNECT proxy for HTTPS relays, overriding HTTPS_PROXY. An empty explicit value
+disables the environment proxy. No proxy credentials are saved in ship state.
+Prefer the environment for credentials rather than exposing them in argv.
+`diagnose` reads /healthz without keys or a ship; it sends no correspondence.
 
 Start here:
   tinrelay --ship SHIP join --server URL

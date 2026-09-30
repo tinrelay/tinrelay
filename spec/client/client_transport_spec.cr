@@ -97,7 +97,7 @@ describe Tinrelay::Remote do
     response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
     TinrelayClientTransportSpec.with_raw_response(response, "https") do |origin|
       error = begin
-        Tinrelay::Remote.new(origin).post("/v1/test", %({}))
+        Tinrelay::Remote.new(origin, http_proxy: "").post("/v1/test", %({}))
         fail("expected a TLS negotiation failure")
       rescue ex : OpenSSL::Error | IO::Error
         ex

@@ -1,7 +1,7 @@
 module Tinrelay
   class Client
     def self.join(keyring_path : String, server : String, ship : String,
-                  owner_path : String? = nil) : Client
+                  owner_path : String? = nil, remote : Remote? = nil) : Client
       owner_file = owner_path || "#{keyring_path}.owner"
       prepared = nil.as(JoinKeyring?)
       begin
@@ -10,7 +10,7 @@ module Tinrelay
         )
         keyring = prepared.keyring
         existing = prepared.cleanup_token.nil?
-        client = new(keyring)
+        client = new(keyring, remote)
         if existing && claim_committed?(client, keyring)
           keyring.finish_join
           return client

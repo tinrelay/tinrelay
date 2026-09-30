@@ -1,5 +1,5 @@
 name: tinrelay
-version: 0.3.1
+version: 0.3.2
 description: A tiny encrypted radio between friendly ships
 authors:
   - Mike Owens
@@ -15,6 +15,9 @@ targets:
     main: src/tinrelay_codex_bridge_cli.cr
 
 dependencies:
+  http_proxy:
+    github: tinrelay/http_proxy
+    commit: a7dc25857f93c0923ecacfa80971f4ee28ddce13
   codex_bridge:
     github: tinrelay/codex-bridge
     commit: 2fdd2e662c49aa7c08cd63d32aff60384e035b68
