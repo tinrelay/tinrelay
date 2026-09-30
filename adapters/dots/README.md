@@ -230,6 +230,10 @@ claim. Resource delivery is not proof of visible UI; text-only delivery remains 
   not supported. Ordinary collection remains independent.
 - Only transmissions are delivered. Hails/rejected records stop for local inspection;
   they are not silently skipped or routed.
+- Selection is ship-wide and oldest-first. An unacknowledged, unmatched or
+  accepted-but-unhandled oldest source stalls every later transmission for that
+  ship, including other attention labels. Recovery must resolve that source;
+  there is no per-attention parallel queue or automatic skip.
 - Callback attempts time out after 10 seconds, ingress after 30 seconds. Retries have
   30/60/120/240-second minimum gaps and stop after five attempts or a callback 2xx.
   The budget survives restart and refresh. 410/413 removes that subscription.
