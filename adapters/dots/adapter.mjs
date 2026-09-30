@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {setTimeout as pause} from 'node:timers/promises';
 import {promisify} from 'node:util';
 import {pathToFileURL} from 'node:url';
-import {EVENT_NAME, readJSON, validateEvent} from './receiver/event.mjs';
+import {EVENT_NAME, readJSON, sourceIdPattern, validateEvent} from './receiver/event.mjs';
 
 const execute = promisify(execFile);
 const shipPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -14,6 +14,12 @@ export class Adapter {
   constructor(config, {send = fetch, signal} = {}) {
     if (typeof config.ship !== 'string' || !shipPattern.test(config.ship) || typeof config.tinrelay !== 'string' ||
         !config.tinrelay.startsWith('/')) throw Error('invalid_configuration');
+    const guarded = config.expectedSourceId !== undefined || config.expectedAttention !== undefined;
+    if (guarded && (typeof config.expectedSourceId !== 'string' ||
+        !sourceIdPattern.test(config.expectedSourceId) || typeof config.expectedAttention !== 'string' ||
+        !(config.expectedAttention === '' || shipPattern.test(config.expectedAttention)))) {
+      throw Error('invalid_expected_source');
+    }
     const receiver = new URL(config.receiver);
     if (receiver.pathname !== '/' || receiver.search || receiver.hash || receiver.username ||
         receiver.password || !(receiver.protocol === 'https:' ||
@@ -68,6 +74,11 @@ export class Adapter {
   }
   async once() {
     const pointer = await this.cli(['radio', 'wait', '--local']);
+    if (this.config.expectedSourceId !== undefined &&
+        (pointer.kind !== 'transmission' || pointer.source_id !== this.config.expectedSourceId ||
+          pointer.name !== this.config.expectedAttention)) {
+      throw Error('unexpected_source');
+    }
     // Hails and rejected evidence require deliberate local attention. Do not skip
     // or route them to reach a later transmission.
     if (pointer.kind !== 'transmission') throw Error('non_transmission_requires_local_attention');

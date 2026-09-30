@@ -1,3 +1,4 @@
+export const sourceIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const EVENT_NAME = 'tinrelay.transmission.received';
 export const namePattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 export class Refusal extends Error {
@@ -29,7 +30,7 @@ export function validateEvent(event, ship) {
   valid(event?.name === EVENT_NAME && event.cursor === null && data?.kind === 'transmission');
   valid(data.contract === 'tinrelay-message-delivery-v2' && data.local_ship === ship);
   valid(typeof data.transmission_id === 'string' &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(data.transmission_id));
+    sourceIdPattern.test(data.transmission_id));
   valid(event.eventId === `tinrelay:${ship}:transmission:${data.transmission_id}`);
   valid(typeof data.sender_ship === 'string' && namePattern.test(data.sender_ship) && typeof data.attention_label === 'string' &&
     (data.attention_label === '' || namePattern.test(data.attention_label)));

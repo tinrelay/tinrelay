@@ -134,6 +134,14 @@ node --use-env-proxy adapters/dots/adapter.mjs run /absolute/path/to/adapter.jso
 `--use-env-proxy` honors the process's configured HTTP/HTTPS proxy and exclusions;
 no proxy address is stored in configuration.
 
+For a bounded qualification or exact-source retry, add both `expectedSourceId`
+(the transmission UUID from the self-send receipt) and `expectedAttention` (the
+unique test attention) to this configuration. Use `once`, not `run`. The adapter
+compares the body-free pointer before reading any transmission body. Another
+pending source aborts without reading, forwarding or routing it; restore ordinary
+delivery rather than skipping that source. These guards do not replace exclusive
+selector ownership.
+
 `once` waits for one local source and reports only its ID and `pending` or `routed`.
 `run` checks a pending delivery every 30 seconds without model turns. Transport,
 CLI and configuration failures stop with a fixed body-free diagnostic; inspect,
@@ -177,6 +185,14 @@ reviving an unsubscribed or superseded callback. One callback owns each attentio
 label. Expired subscriptions cannot deliver; their signing material is cleared on
 a subsequent request. There is no background physical-deletion promise.
 The protocol follows the [OpenAI MCP Events contract](https://developers.openai.com/plugins/build/mcp-events).
+
+## Display capability check
+
+`tinrelay_preview` takes an empty object and offers one fixed synthetic MCP Apps
+card, with a plain-text tool result when the client does not render UI. Its resource
+loads no scripts, network services or radio data. It is a display-capability probe,
+not a message history, sending interface or replacement for the delivery contract.
+Actual rendering must be checked in each target client before claiming support.
 
 ## Limits and recovery
 

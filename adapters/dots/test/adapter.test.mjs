@@ -104,7 +104,7 @@ else if (args[1] === 'routed') {
   t.after(() => db.close());
   const transport = async (url, options) => receive(new Request(url, options));
   const config = {ship, tinrelay: cli, receiver: 'https://receiver.example', token: credential};
-  const adapter = () => new Adapter(config, {send: transport});
+  const adapter = overrides => new Adapter({...config, ...overrides}, {send: transport});
   const request = (path, body, authorization = credential) => receive(new Request('https://receiver.example' + path,
     {method: body ? 'POST' : 'GET', headers: {'OAI-Sites-Authorization': `Bearer ${authorization}`},
       ...(body ? {body: JSON.stringify(body)} : {})}));
@@ -524,4 +524,19 @@ test('synthetic viewer exposes an inert UI resource and preserves text-only tool
   assert.equal(result.structuredContent.synthetic, true);
   assert.equal(result.content[0].type, 'text');
   assert.equal(f.database().prepare('SELECT count(*) AS n FROM dots_endpoint').get().n, 0);
+});
+
+test('exact-source guard refuses other pending pointers before any body read or delivery', async t => {
+  const f = await fixture(t);
+  const expected = {expectedSourceId: id, expectedAttention: 'steward'};
+  await writeFile(join(f.root, 'pointer.json'), JSON.stringify({...pointer,
+    source_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'other-attention'}));
+  await assert.rejects(f.adapter(expected).once(), /unexpected_source/);
+  const calls = (await readFile(join(f.root, 'calls'), 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual(calls.map(args => args.slice(0, 2)), [['radio', 'wait']]);
+  assert.equal(f.database().prepare('SELECT count(*) AS n FROM dots_deliveries').get().n, 0);
+  await assert.rejects(readFile(join(f.root, 'routed')));
+  await writeFile(join(f.root, 'pointer.json'), JSON.stringify(pointer));
+  assert.equal((await f.adapter(expected).once()).state, 'pending');
+  assert.throws(() => f.adapter({expectedSourceId: id}), /invalid_expected_source/);
 });
