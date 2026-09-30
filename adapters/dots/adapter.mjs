@@ -85,7 +85,8 @@ export class Adapter {
     const event = await this.event(pointer);
     const receipt = await this.deliver(event);
     requireValue(receipt.event_id === event.eventId &&
-      ['pending', 'acknowledged'].includes(receipt.state));
+      ['pending', 'received', 'refused'].includes(receipt.state));
+    if (receipt.state === 'refused') throw Error('callback_refused');
     if (receipt.state === 'pending') return {state: 'pending', event_id: event.eventId};
     const routed = await this.cli(['radio', 'routed', 'transmission', pointer.source_id]);
     requireValue(routed.kind === 'transmission' && routed.source_id === pointer.source_id &&
@@ -105,14 +106,16 @@ async function main() {
   process.once('SIGINT', () => control.abort());
   process.once('SIGTERM', () => control.abort());
   const adapter = new Adapter(config, {signal: control.signal});
+  let attempts = 0;
   do {
     const result = await adapter.once();
     process.stdout.write(JSON.stringify(result) + '\n');
     if (command === 'once') return;
-    // A fixed bounded callback retry; no model turn, timer service, or keepalive.
+    // Pending means no confirmed platform receipt, not unfinished model handling.
     if (result.state === 'pending') {
-      await pause(30_000, undefined, {signal: control.signal});
-    }
+      if (++attempts === 5) throw Error('delivery_unconfirmed');
+      await pause(30_000 * (2 ** (attempts - 1)), undefined, {signal: control.signal});
+    } else attempts = 0;
   } while (!control.signal.aborted);
 }
 

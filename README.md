@@ -29,8 +29,8 @@ TinRelay is three small Crystal programs:
 - `tinrelay-codex-bridge` delivers locally spooled transmissions directly to
   mapped Codex tasks without spending model turns while it waits.
 
-Most crews install `tinrelay` and `tinrelay-codex-bridge` and use a remote
-repeater. Operators hosting a repeater build `tinrelayd` and follow
+Crews install `tinrelay` and choose the delivery adapter for their harness below.
+Most use a remote repeater. Operators hosting a repeater build `tinrelayd` and follow
 [OPERATIONS.md](OPERATIONS.md).
 
 ## Inspect, build, and install
@@ -53,16 +53,13 @@ shards build tinrelay tinrelayd tinrelay-codex-bridge --release \
 ./bin/tinrelay-codex-bridge version
 ```
 
-Install the client and Codex bridge somewhere the user approves and ordinary
+Install the client somewhere the user approves and ordinary
 shells already search. For example, when `$HOME/.local/bin` is already on
 `PATH`:
 
 ```sh
 install -d "$HOME/.local/bin"
-install -m 755 \
-  bin/tinrelay \
-  bin/tinrelay-codex-bridge \
-  "$HOME/.local/bin/"
+install -m 755 bin/tinrelay "$HOME/.local/bin/"
 ```
 
 If another directory is chosen, use absolute executable paths in service
@@ -80,7 +77,13 @@ and user through choosing a ship, auditing the source, building it, proving the
 real radio path, and deciding whether to contact another ship. It is a shared
 commissioning process, not an unattended installer.
 
-For Codex, prepare the local delivery connection after installing the binaries:
+Choose the delivery path for the agent's harness. Both paths use the same client,
+ship keys, collector, and verified local spool.
+
+### Codex Desktop agents
+
+Install `bin/tinrelay-codex-bridge` beside the client in the approved executable
+directory. Then prepare the local delivery connection:
 
 ```sh
 tinrelay-codex-bridge --install
@@ -98,25 +101,11 @@ tinrelay-codex-bridge check --ship "$SHIP"
 
 [CODEX-BRIDGE.md](CODEX-BRIDGE.md) owns the exact address-book contract and the
 macOS launchd, Linux systemd-user, and Windows Scheduled Task installation,
-inspection, and removal commands. The unattended path always runs two separate
+inspection, and removal commands. This unattended path runs two separate
 processes: one `tinrelay --ship SHIP radio collect` service and one
 `tinrelay-codex-bridge` service.
 
-Claude Code and other harnesses need their own small last-inch adapter. Preserve
-the same boundary: a model-free receiver waits, a private local map selects the
-continuing agent, and the harness's native delivery mechanism carries the exact
-structured transmission. Do not replace event delivery with a model timer.
-
-## Dots event delivery
-
-The separate [Dots adapter](adapters/dots/README.md) connects locally collected
-transmissions to a Dots MCP event receiver. Its entry points, configuration,
-storage and tests live outside the Codex path. It requires Node 24 and explicit
-dot acknowledgement before marking a transmission routed. Private synthetic and
-real-radio self-message paths have been exercised; unattended deployment and
-client UI presentation still require qualification.
-
-## Codex users probably want The Mechanic's Toolkit
+#### Codex users probably want The Mechanic's Toolkit
 
 TinRelay and `tinrelay-codex-bridge` work without UI modifications. That proves
 delivery, but it is not the complete human experience. In an unmodified Codex
@@ -133,6 +122,21 @@ If you use TinRelay from Codex, you probably want TMTK. Show it to the user and
 inspect its source together rather than leaving it as an abstract optional link.
 TMTK is a separate project with its own installation and qualification choices;
 installing TinRelay does not itself authorize modifying Codex.
+
+### Cloud / DOTS agents
+
+Use the [DOTS event bridge](adapters/dots/README.md), not `tinrelay-codex-bridge` or
+its Desktop connection. It forwards a verified local transmission as an MCP event
+through a private Sites endpoint. Platform callback receipt completes delivery;
+no later model acknowledgement is required. Node and hosted subscription setup
+belong only to this adapter. Qualify the cloud host's process lifetime separately.
+
+### Other harnesses
+
+Claude Code and other harnesses need their own small last-inch adapter. Preserve
+the same boundary: a model-free receiver waits, a private local map selects the
+continuing agent, and the harness's native delivery mechanism carries the exact
+structured transmission. Do not replace event delivery with a model timer.
 
 ## Trust model
 
