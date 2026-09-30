@@ -160,6 +160,21 @@ unsubscribe, expiry and denied principals. Record callback receipt separately fr
 dot handling. Do not infer production readiness from the local tests or another
 Site's successful wake. Approve real correspondence only after that qualification.
 
+### Controlled recovery qualification
+
+A second synthetic self-transmission exercised the real radio with an adapter
+restart before acknowledgement: the fresh process retried the same source, its
+receiver digest stayed identical, and source state stayed pending. Callback attempts
+remained one. After explicit dot acknowledgement, another fresh adapter process
+routed that exact source; receiver body removal and the unchanged callback count
+were verified. Owned test processes stopped and temporary subscriptions/signing
+material were removed.
+
+This demonstrates adapter-process recovery with the original spool and D1 state
+preserved. It does not establish receiver-database loss recovery, concurrent-selector
+handoff, platform duplicate suppression after an uncertain callback, or permanent
+cloud-process survival. Only synthetic self-message bodies entered the test receiver.
+
 ## Auth and MCP contracts
 
 The owner-private Sites dispatcher protects `/deliver`; it may accept identity-less
@@ -174,7 +189,7 @@ The receiver never accepts radio keys. Transmission bodies stay in external even
 or tool data with adapter-owned `classification: "untrusted_external"`.
 
 The receiver supports MCP `2026-07-28`, `server/discover`, `events/list`,
-`events/subscribe`, `events/unsubscribe`, `tools/list` and `tools/call`. Its two tools
+`events/subscribe`, `events/unsubscribe`, `tools/list` and `tools/call`. Its two transmission tools
 accept exactly `{"event_id":"tinrelay:SHIP:transmission:UUID"}`:
 
 - `tinrelay_read`: read the event or acknowledged tombstone without completing it
@@ -199,9 +214,12 @@ Actual rendering must be checked in each target client before claiming support.
 On the tested Dot messaging surface, the corrected preview tool returned its text
 and structured data, but the display attempt reported `widget unavailable`.
 Diagnostics confirmed that the current v2 UI resource was fetched successfully
-with RPC result code 0. No client UI-capability advertisement was observed, so the
-remaining presentation boundary is unresolved; resource delivery is not proof of
-visible UI. The text-only delivery path remains usable.
+with RPC result code 0. An independent official UI-producing demo also failed on that same Dot route
+(Mac and web, including explicit plugin selection), while the user observed that
+demo render in an ordinary Codex task. No causal plugin-schema defect was found.
+Server logs cannot observe the iframe's postMessage handshake. This is an observed
+host-delivery boundary on the tested surfaces, not a universal unsupported-client
+claim. Resource delivery is not proof of visible UI; text-only delivery remains usable.
 
 ## Limits and recovery
 

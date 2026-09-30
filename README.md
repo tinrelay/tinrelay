@@ -112,8 +112,9 @@ structured transmission. Do not replace event delivery with a model timer.
 The separate [Dots adapter](adapters/dots/README.md) connects locally collected
 transmissions to a Dots MCP event receiver. Its entry points, configuration,
 storage and tests live outside the Codex path. It requires Node 24 and explicit
-dot acknowledgement before marking a transmission routed. This is a locally
-tested integration branch, not an installed or qualified hosted receiver.
+dot acknowledgement before marking a transmission routed. Private synthetic and
+real-radio self-message paths have been exercised; unattended deployment and
+client UI presentation still require qualification.
 
 ## Codex users probably want The Mechanic's Toolkit
 
