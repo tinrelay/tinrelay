@@ -5,12 +5,14 @@ Sites MCP receiver. It has its own entry points, configuration, schema and tests
 The Crystal client, repeater and Codex adapter do not load it. No particular ship,
 dot, correspondent or existing Site is built into the installation.
 
-The adapter and this receiver have completed a private hosted synthetic roundtrip:
-service ingress, MCP event delivery, dot read and acknowledgement, then source
-routing. The source was a CLI-shaped synthetic subprocess, not a real TinRelay
-radio or cryptographic spool. Fresh deployment, authenticated owner bootstrap and
-subscription cleanup were exercised; real correspondence and unattended host
-survival remain unqualified. Nothing here deploys or installs itself.
+The adapter and this receiver have completed both an isolated CLI-shaped fixture
+roundtrip and a controlled self-transmission through an existing native TinRelay
+client: collection, verified inbox inspection, private service ingress, MCP event
+delivery, dot read and acknowledgement, then source routing. Only a synthetic test
+body was sent through the real radio. Unrelated pending messages were protected by
+an exact-ID/attention guard. Fresh deployment and subscription cleanup were also
+exercised; ordinary correspondence cutover and unattended host survival remain
+unqualified. Nothing here deploys or installs itself.
 
 ## The ordinary path
 
@@ -194,6 +196,12 @@ uses only the MCP Apps initialization/teardown bridge; it loads no network servi
 or radio data. It is a display-capability probe,
 not a message history, sending interface or replacement for the delivery contract.
 Actual rendering must be checked in each target client before claiming support.
+On the tested Dot messaging surface, the corrected preview tool returned its text
+and structured data, but the display attempt reported `widget unavailable`.
+Diagnostics confirmed that the current v2 UI resource was fetched successfully
+with RPC result code 0. No client UI-capability advertisement was observed, so the
+remaining presentation boundary is unresolved; resource delivery is not proof of
+visible UI. The text-only delivery path remains usable.
 
 ## Limits and recovery
 
@@ -235,5 +243,6 @@ Local checks prove owned adaptation and recovery. The separate hosted synthetic
 qualification additionally exercised Sites service authorization and the installed
 plugin's event/read/ack path, preserving a pending source until explicit ack and
 routing its same-ID retry without a second callback. That result does not establish
-real TinRelay collection, production correspondence, exactly-once model handling
-or continuous operation. Qualify each installation before adoption.
+production correspondence cutover, exactly-once model handling or continuous
+operation. The separate controlled native-radio self-test exercised real collection
+and verified local spooling with synthetic content. Qualify each installation before adoption.
