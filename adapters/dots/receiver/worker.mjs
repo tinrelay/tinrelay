@@ -51,16 +51,18 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
     const principal = request.headers.get('oai-authenticated-user-id');
     let message;
     const path = new URL(request.url).pathname;
-    async function owner(enroll = false) {
+    async function owner(enroll = false, allowUninitialized = false) {
       if (!principal) throw new Refusal('authenticated_user_required', -32012);
       let endpoint = await db.get('SELECT * FROM dots_endpoint');
       if (enroll && !endpoint) {
         await db.run('INSERT OR IGNORE INTO dots_endpoint VALUES (?, ?)', ship, principal);
         endpoint = await db.get('SELECT * FROM dots_endpoint');
       }
+      if (!endpoint && allowUninitialized) return false;
       if (!endpoint || endpoint.ship !== ship || endpoint.owner !== principal) {
         throw new Refusal('owner_required', -32012);
       }
+      return true;
     }
     async function subscription(params) {
       valid(params.name === EVENT_NAME && params.delivery?.mode === 'webhook');
@@ -170,9 +172,13 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
           return {};
         }
         case 'tools/call': {
-          await owner();
+          const initialized = await owner(false, params.name === 'tinrelay_read');
           const id = params.arguments?.event_id;
           valid(typeof id === 'string' && Object.keys(params.arguments).length === 1);
+          if (!initialized) {
+            const value = {state: 'uninitialized', event: null};
+            return {content: [{type: 'text', text: JSON.stringify(value)}], structuredContent: value};
+          }
           const row = await db.get('SELECT * FROM dots_deliveries WHERE id = ?', id);
           valid(row, 'delivery_not_found');
           let value;

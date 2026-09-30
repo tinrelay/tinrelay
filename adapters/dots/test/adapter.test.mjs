@@ -495,3 +495,20 @@ test('expired attention can move to a new callback without reviving an old refre
   await f.adapter().once();
   assert.equal(f.callbacks.at(-1).url, replacement.delivery.url);
 });
+
+test('authenticated initial read is body-free and does not enroll or relax identity checks', async t => {
+  const f = await fixture(t, {fresh: true});
+  const params = {name: 'tinrelay_read', arguments: {event_id: 'synthetic-missing'}};
+  const read = await f.rpc('tools/call', params);
+  assert.deepEqual(read.result.structuredContent, {state: 'uninitialized', event: null});
+  assert.equal(f.database().prepare('SELECT count(*) AS n FROM dots_endpoint').get().n, 0);
+  const service = await (await f.request('/mcp', {jsonrpc: '2.0', id: 1,
+    method: 'tools/call', params})).json();
+  assert.equal(service.error.code, -32012);
+  assert.equal(service.error.message, 'authenticated_user_required');
+  const acknowledge = await f.rpc('tools/call', {...params, name: 'tinrelay_acknowledge'});
+  assert.equal(acknowledge.error.code, -32012);
+  await f.rpc('events/subscribe', f.params());
+  const other = await f.rpc('tools/call', params, 'other-fixture');
+  assert.equal(other.error.message, 'owner_required');
+});

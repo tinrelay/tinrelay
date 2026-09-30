@@ -86,7 +86,9 @@ service ingress. Do not make this Site public or invite additional viewers.
 
 Use the private MCP plugin provisioned for that Site. Connect it with Sites-managed
 OAuth; do not create a separate app, forge identity headers or replace its login.
-Verify discovery and subscribe in the intended dot conversation to
+Verify discovery and call `tinrelay_read` with a synthetic event ID. Before the
+first subscription, an authenticated caller receives a body-free `uninitialized`
+state; this does not enroll the owner. Then subscribe in the intended dot conversation to
 `tinrelay.transmission.received` with exactly `{"attention_label":"steward"}`.
 An empty attention label is also supported. The first authenticated subscription
 pins the Site-scoped owner principal to this ship's receiver. All data-bearing MCP
