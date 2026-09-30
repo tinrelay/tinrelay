@@ -168,6 +168,11 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
         case 'resources/list': return {resources: [{uri: PREVIEW_URI, name: 'TinRelay synthetic preview',
           mimeType: preview.mimeType}]};
         case 'resources/read':
+          if (env.DOTS_DIAGNOSTICS === '1') {
+            console.info(JSON.stringify({resource_version: params.uri === PREVIEW_URI ? 'v2' :
+              params.uri === 'ui://tinrelay/synthetic-preview-v1.html' ? 'v1' : 'other',
+              resource_rpc_code: params.uri === PREVIEW_URI ? 0 : -32602}));
+          }
           valid(params.uri === PREVIEW_URI, 'resource_not_found');
           return {contents: [preview]};
         case 'events/list': return {events: [{name: EVENT_NAME,

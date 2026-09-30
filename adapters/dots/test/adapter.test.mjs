@@ -519,6 +519,9 @@ test('synthetic viewer exposes an inert UI resource and preserves text-only tool
   const preview = tools.find(tool => tool.name === 'tinrelay_preview');
   const resource = (await f.rpc('resources/read', {uri: preview._meta.ui.resourceUri})).result.contents[0];
   assert.equal(resource.mimeType, 'text/html;profile=mcp-app');
+  const stale = await f.rpc('resources/read', {uri: 'ui://tinrelay/synthetic-preview-v1.html'});
+  assert.equal(stale.error.code, -32602);
+  assert.equal(stale.error.message, 'resource_not_found');
   assert.deepEqual(resource._meta.ui.csp, {connectDomains: [], resourceDomains: []});
   const result = (await f.rpc('tools/call', {name: 'tinrelay_preview', arguments: {}})).result;
   assert.equal(result.structuredContent.synthetic, true);
