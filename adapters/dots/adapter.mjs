@@ -49,7 +49,10 @@ export class Adapter {
       headers: {'Content-Type': 'application/json', 'OAI-Sites-Authorization': `Bearer ${this.config.token}`},
       body: JSON.stringify(event),
     });
-    if (!response.ok) { await response.body?.cancel(); throw Error('receiver_unavailable'); }
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw Object.assign(Error('receiver_unavailable'), {httpStatus: response.status});
+    }
     return readJSON(response.body, 4096);
   }
   async event(pointer) {
@@ -72,8 +75,13 @@ export class Adapter {
       }, cursor: null};
     return validateEvent(event, this.config.ship);
   }
-  async once() {
-    const pointer = await this.cli(['radio', 'wait', '--local']);
+  async once(wait = true) {
+    this.phase = 'select';
+    const pointer = await this.cli(['radio', wait ? 'wait' : 'poll', '--local']);
+    if (pointer.state === 'quiet') {
+      requireValue(!wait && Object.keys(pointer).length === 1);
+      return {state: 'quiet'};
+    }
     if (this.config.expectedSourceId !== undefined &&
         (pointer.kind !== 'transmission' || pointer.source_id !== this.config.expectedSourceId ||
           pointer.name !== this.config.expectedAttention)) {
@@ -82,12 +90,15 @@ export class Adapter {
     // Hails and rejected evidence require deliberate local attention. Do not skip
     // or route them to reach a later transmission.
     if (pointer.kind !== 'transmission') throw Error('non_transmission_requires_local_attention');
+    this.phase = 'inspect';
     const event = await this.event(pointer);
+    this.phase = 'deliver';
     const receipt = await this.deliver(event);
     requireValue(receipt.event_id === event.eventId &&
       ['pending', 'received', 'refused'].includes(receipt.state));
     if (receipt.state === 'refused') throw Error('callback_refused');
     if (receipt.state === 'pending') return {state: 'pending', event_id: event.eventId};
+    this.phase = 'route';
     const routed = await this.cli(['radio', 'routed', 'transmission', pointer.source_id]);
     requireValue(routed.kind === 'transmission' && routed.source_id === pointer.source_id &&
       routed.state === 'routed');
@@ -96,29 +107,42 @@ export class Adapter {
 }
 
 async function main() {
-  const [command, path, ...extra] = process.argv.slice(2);
-  if (!['once', 'run'].includes(command) || !path || extra.length) {
-    throw Error('usage: node adapters/dots/adapter.mjs once|run CONFIG.json');
+  let adapter;
+  try {
+    const [command, path, ...extra] = process.argv.slice(2);
+    if (!['once', 'run'].includes(command) || !path || extra.length) {
+      throw Error('usage: node adapters/dots/adapter.mjs once|run CONFIG.json');
+    }
+    const config = JSON.parse(await readFile(path, 'utf8'));
+    config.token = process.env.TINRELAY_DOTS_TOKEN;
+    const control = new AbortController();
+    process.once('SIGINT', () => control.abort());
+    process.once('SIGTERM', () => control.abort());
+    adapter = new Adapter(config, {signal: control.signal});
+    let attempts = 0;
+    do {
+      const result = await adapter.once(command === 'run');
+      process.stdout.write(JSON.stringify(result) + '\n');
+      if (command === 'once') return;
+      // Pending means no confirmed platform receipt, not unfinished model handling.
+      if (result.state === 'pending') {
+        if (++attempts === 5) throw Error('delivery_unconfirmed');
+        await pause(30_000 * (2 ** (attempts - 1)), undefined, {signal: control.signal});
+      } else attempts = 0;
+    } while (!control.signal.aborted);
+  } catch (error) {
+    const diagnostic = {error: 'dots_adapter_stopped', phase: adapter?.phase ?? 'setup'};
+    if (Number.isInteger(error.code) && error.code >= 0 && error.code <= 255) {
+      diagnostic.exit_code = error.code;
+    }
+    if (Number.isInteger(error.httpStatus) && error.httpStatus >= 100 && error.httpStatus <= 599) {
+      diagnostic.http_status = error.httpStatus;
+    }
+    process.stderr.write(JSON.stringify(diagnostic) + '\n');
+    process.exitCode = 1;
   }
-  const config = JSON.parse(await readFile(path, 'utf8'));
-  config.token = process.env.TINRELAY_DOTS_TOKEN;
-  const control = new AbortController();
-  process.once('SIGINT', () => control.abort());
-  process.once('SIGTERM', () => control.abort());
-  const adapter = new Adapter(config, {signal: control.signal});
-  let attempts = 0;
-  do {
-    const result = await adapter.once();
-    process.stdout.write(JSON.stringify(result) + '\n');
-    if (command === 'once') return;
-    // Pending means no confirmed platform receipt, not unfinished model handling.
-    if (result.state === 'pending') {
-      if (++attempts === 5) throw Error('delivery_unconfirmed');
-      await pause(30_000 * (2 ** (attempts - 1)), undefined, {signal: control.signal});
-    } else attempts = 0;
-  } while (!control.signal.aborted);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch(() => {process.stderr.write('Dots adapter stopped; source remains recoverable\n'); process.exitCode = 1;});
+  main();
 }

@@ -4,11 +4,14 @@ The bridge forwards a verified local TinRelay transmission to the subscribed clo
 conversation as an MCP event. Crystal, the repeater, and the Codex adapter do not
 load this code. Use Node 24.19 or newer with `--use-env-proxy` when the host requires
 its invocation's HTTP/HTTPS proxy. No proxy endpoint is persisted.
+Use the TinRelay client built from this checkout; `once` needs its
+`radio poll --local` command, so an older installed client must be rebuilt.
 
 ## Delivery boundary
 
 Run the ordinary `tinrelay --ship "$SHIP" radio collect` independently. The bridge
-selects a pending source with `radio wait --local`, verifies it with `inbox show`,
+selects a pending source with `radio poll --local` (`once`) or `radio wait --local`
+(`run`), verifies it with `inbox show`,
 and sends its complete `untrusted_external` envelope to the private receiver.
 The stable event ID is `tinrelay:SHIP:transmission:UUID`; bytes and occurrence time
 come from the immutable local record. No radio key leaves the collector.
@@ -81,10 +84,19 @@ node --use-env-proxy adapters/dots/adapter.mjs once /absolute/path/to/adapter.js
 node --use-env-proxy adapters/dots/adapter.mjs run /absolute/path/to/adapter.json
 ```
 
-`once` attempts one selected source; `run` continues after confirmed delivery.
+`once` polls the local spool once: it exits successfully with `{"state":"quiet"}`
+when empty, without waiting for collection or contacting the receiver. Otherwise
+it attempts that one selected source. `run` waits for local work and continues
+after confirmed delivery.
 Unconfirmed receipts back off by 30/60/120/240 seconds and stop after five attempts
 in that invocation. Transport/CLI/configuration errors and terminal callback
-refusals stop visibly with the source recoverable. Callback 410/413 removes that
+refusals stop visibly with the source recoverable. Failure stderr is one JSON
+object with `error: "dots_adapter_stopped"` and a `setup`, `select`, `inspect`,
+`deliver`, or `route` phase. Observed numeric child exit and receiver HTTP codes
+appear as `exit_code` and `http_status`; missing codes are omitted. Exception
+text, child output, endpoints, credentials, and message bodies are not reported.
+These diagnostics do not infer retryability or change receipt authority.
+Callback 410/413 removes that
 subscription; there is no automatic skip or model-ack wait. SIGINT/SIGTERM abort
 owned work. Use existing process supervision only when separately authorized.
 

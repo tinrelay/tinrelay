@@ -1,9 +1,15 @@
 module Tinrelay
   module LocalRadio
+    def self.poll(ship : String, spool : Spool) : RadioEvent?
+      if record = spool.next_unrouted
+        event(ship, record)
+      end
+    end
+
     def self.wait(ship : String, spool : Spool) : RadioEvent
       loop do
-        if record = spool.next_unrouted
-          return event(ship, record)
+        if pointer = poll(ship, spool)
+          return pointer
         end
         sleep 250.milliseconds
       end

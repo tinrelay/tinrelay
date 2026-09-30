@@ -210,11 +210,12 @@ module Tinrelay
         end
         puts event.to_json
       when "poll"
+        local = !!argv.delete("--local")
         spool = Spool.new(paths.spool)
         no_extra!(argv)
-        poller = client(paths, http_proxy)
+        poller = client(paths, http_proxy) unless local
         event = with_local_delivery(spool) do
-          poller.radio_poll(spool)
+          local ? LocalRadio.poll(ship, spool) : poller.not_nil!.radio_poll(spool)
         end
         puts(event ? event.to_json : %({"state":"quiet"}))
       when "routed"

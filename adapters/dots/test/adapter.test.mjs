@@ -2,10 +2,89 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile, writeFile, rm, cp, readdir} from 'node:fs/promises';
 import {join} from 'node:path';
-import {execFile} from 'node:child_process';
+import {execFile, spawn} from 'node:child_process';
 import {promisify} from 'node:util';
+import {createServer} from 'node:http';
 import {Adapter} from '../adapter.mjs';
 import {fixture, id, pointer, source, token, secret} from './fixture.mjs';
+
+test('once exits quiet from an empty local spool without receiver traffic', async t => {
+  const f = await fixture(t);
+  const config = join(f.root, 'adapter.json');
+  await writeFile(config, JSON.stringify({...f.config, receiver: 'http://127.0.0.1:1', token: undefined}));
+  await writeFile(join(f.root, 'quiet'), '');
+  const result = await promisify(execFile)(process.execPath,
+    [new URL('../adapter.mjs', import.meta.url).pathname, 'once', config],
+    {env: {...process.env, TINRELAY_DOTS_TOKEN: token}, timeout: 2000});
+  assert.deepEqual(JSON.parse(result.stdout), {state: 'quiet'});
+  assert.equal(result.stderr, '');
+  const calls = (await readFile(join(f.root, 'calls'), 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual(calls, [['radio', 'poll', '--local', '--ship', 'receiver']]);
+  await assert.rejects(readFile(join(f.root, 'routed')));
+});
+
+test('run keeps the local wait and aborts it without manufacturing a quiet result or numeric code',
+  {timeout: 3000}, async t => {
+  const f = await fixture(t);
+  const config = join(f.root, 'adapter.json');
+  await writeFile(config, JSON.stringify({...f.config, receiver: 'http://127.0.0.1:1', token: undefined}));
+  await writeFile(join(f.root, 'quiet'), '');
+  const child = spawn(process.execPath, [new URL('../adapter.mjs', import.meta.url).pathname, 'run', config],
+    {env: {...process.env, TINRELAY_DOTS_TOKEN: token}});
+  t.after(() => {if (child.exitCode === null) child.kill('SIGTERM');});
+  let output = '', error = '';
+  child.stdout.on('data', bytes => {output += bytes;});
+  child.stderr.on('data', bytes => {error += bytes;});
+  const completion = new Promise((resolve, reject) => {
+    child.once('close', resolve);
+    child.once('error', reject);
+  });
+  let calls;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {calls = JSON.parse((await readFile(join(f.root, 'calls'), 'utf8')).trim()); break;}
+    catch (failure) {if (failure.code !== 'ENOENT') throw failure;}
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.deepEqual(calls, ['radio', 'wait', '--local', '--ship', 'receiver']);
+  child.kill('SIGTERM');
+  assert.equal(await completion, 1);
+  assert.equal(output, '');
+  assert.deepEqual(JSON.parse(error), {error: 'dots_adapter_stopped', phase: 'select'});
+});
+
+test('failure diagnostics identify only the phase and observed numeric codes', async t => {
+  for (const [phase, marker, exitCode] of [
+    ['select', 'blocked', 10], ['inspect', 'fail-inspect', 13],
+    ['deliver', null, null], ['route', 'fail-route', 11],
+  ]) {
+    const f = await fixture(t);
+    if (marker) await writeFile(join(f.root, marker), '');
+    const server = createServer((request, response) => {
+      response.setHeader('Connection', 'close');
+      response.writeHead(phase === 'deliver' ? 401 : 200, {'Content-Type': 'application/json'});
+      response.end(phase === 'deliver' ? JSON.stringify({private: [token, secret, source]}) :
+        JSON.stringify({event_id: `tinrelay:receiver:transmission:${id}`, state: 'received'}));
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise(resolve => server.close(resolve)));
+    const config = join(f.root, 'adapter.json');
+    await writeFile(config, JSON.stringify({...f.config,
+      receiver: `http://127.0.0.1:${server.address().port}`, token: undefined}));
+    let failure;
+    try {
+      await promisify(execFile)(process.execPath,
+        [new URL('../adapter.mjs', import.meta.url).pathname, 'once', config],
+        {env: {...process.env, TINRELAY_DOTS_TOKEN: token}, timeout: 3000});
+    } catch (error) {failure = error;}
+    assert.equal(failure.code, 1);
+    assert.equal(failure.stdout, '');
+    const expected = {error: 'dots_adapter_stopped', phase};
+    if (exitCode !== null) expected.exit_code = exitCode;
+    if (phase === 'deliver') expected.http_status = 401;
+    assert.deepEqual(JSON.parse(failure.stderr), expected);
+    await assert.rejects(readFile(join(f.root, 'routed')));
+  }
+});
 
 test('confirmed platform callback receipt routes the exact source without model handling', async t => {
   const f = await fixture(t);

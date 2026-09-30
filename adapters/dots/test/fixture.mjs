@@ -49,9 +49,20 @@ const args = process.argv.slice(2);
 const file = name => path.join(__dirname, name);
 fs.appendFileSync(file('calls'), JSON.stringify(args) + '\\n');
 if (process.env.TINRELAY_LOCAL_DELIVERY_OWNER || process.env.TINRELAY_DOTS_TOKEN) process.exit(9);
-if (fs.existsSync(file('blocked'))) process.exit(10);
-if (args[0] === 'inbox') console.log(fs.readFileSync(file('source.json'), 'utf8'));
-else if (args[1] === 'wait') console.log(fs.readFileSync(file('pointer.json'), 'utf8'));
+if (fs.existsSync(file('blocked'))) {
+  process.stderr.write(fs.readFileSync(file('source.json'), 'utf8'));
+  process.exit(10);
+}
+if (args[0] === 'inbox') {
+  if (fs.existsSync(file('fail-inspect'))) process.exit(13);
+  console.log(fs.readFileSync(file('source.json'), 'utf8'));
+} else if (args[1] === 'poll') {
+  console.log(fs.existsSync(file('quiet')) ? '{"state":"quiet"}' :
+    fs.readFileSync(file('pointer.json'), 'utf8'));
+} else if (args[1] === 'wait') {
+  if (fs.existsSync(file('quiet'))) setInterval(() => {}, 1000);
+  else console.log(fs.readFileSync(file('pointer.json'), 'utf8'));
+}
 else if (args[1] === 'routed') {
   if (fs.existsSync(file('fail-route'))) process.exit(11);
   fs.writeFileSync(file('routed'), args[3]);

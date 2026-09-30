@@ -92,11 +92,73 @@ module TinrelayCliSpec
     process.input.close
     {result, error.to_s}
   end
+
+  def self.run_bounded(args : Array(String), home : String)
+    ensure_binary
+    output = IO::Memory.new
+    error = IO::Memory.new
+    process = Process.new(BINARY, args, env: {"HOME" => home},
+      input: Process::Redirect::Close, output: output, error: error)
+    completion = Channel(Process::Status).new
+    spawn { completion.send(process.wait) }
+    result = select
+    when value = completion.receive
+      value
+    when timeout(2.seconds)
+      process.terminate
+      completion.receive
+      raise "local radio poll waited instead of returning existing work or quiet"
+    end
+    {result, output.to_s, error.to_s}
+  end
 end
 
 Spec.after_suite do
   root = TinrelayCliSpec::BUILD_ROOT
   FileUtils.rm_r(root) if Dir.exists?(root)
+end
+
+describe "local radio polling CLI" do
+  it "returns quiet without a device configuration or network transport" do
+    root = TinrelaySpec.temporary_root
+    result, output, error = TinrelayCliSpec.run_bounded(
+      ["--ship", "local-ship", "--proxy", "not-a-proxy", "radio", "poll", "--local"], root)
+    result.success?.should be_true
+    JSON.parse(output).should eq(JSON.parse(%({"state":"quiet"})))
+    error.should be_empty
+    paths = Tinrelay::LocalPaths.new("local-ship", root)
+    File.exists?(paths.keyring).should be_false
+  ensure
+    FileUtils.rm_r(root) if root && Dir.exists?(root)
+  end
+
+  it "selects existing local evidence without routing it and respects selector ownership" do
+    TinrelaySpec.with_server do |root, origin, _api|
+      paths = Tinrelay::LocalPaths.new("local-ship", root)
+      client = Tinrelay::Client.join(paths.keyring, origin, "local-ship", paths.owner_key)
+      spool = Tinrelay::Spool.new(paths.spool)
+      client.send("steward@local-ship", "Synthetic local polling proof")
+      expected = client.radio_wait(spool, hold_seconds: 0)
+      args = ["--ship", "local-ship", "--proxy", "not-a-proxy", "radio", "poll", "--local"]
+
+      result, output, error = TinrelayCliSpec.run_bounded(args, root)
+      result.success?.should be_true
+      error.should be_empty
+      pointer = JSON.parse(output)
+      pointer["contract"].as_s.should eq("tinrelay-radio-wait-v2")
+      pointer["source_id"].as_s.should eq(expected.source_id)
+      pointer["name"].as_s.should eq("steward")
+      spool.get(expected.kind, expected.source_id).routed.should be_false
+
+      spool.with_local_delivery_lock do
+        blocked, blocked_output, blocked_error = TinrelayCliSpec.run_bounded(args, root)
+        blocked.success?.should be_false
+        blocked_output.should be_empty
+        JSON.parse(blocked_error)["error"].as_s.should eq("conflict")
+      end
+      spool.get(expected.kind, expected.source_id).routed.should be_false
+    end
+  end
 end
 
 describe "tinrelay send CLI input" do

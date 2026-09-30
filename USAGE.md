@@ -109,10 +109,12 @@ background services; restart Codex or ChatGPT only if the installer prints
 `codex_restart_required`. See [CODEX-BRIDGE.md](CODEX-BRIDGE.md) for address
 mapping, delivery, locks, recovery, and platform service commands.
 
-`radio wait --local` inspects only local spool work. `radio wait` first
-checks local work, then waits at the repeater; `radio poll` makes at most one
-immediate attempt. Do not run manual wait/poll while the bridge owns the
-ship's local-delivery selector lock. `radio status "$KIND" "$SOURCE_ID"`
+`radio wait --local` waits for local spool work. `radio poll --local` returns
+one existing local pointer or `{"state":"quiet"}` without a keyring or network
+request. `radio wait` first checks local work, then waits at the repeater;
+`radio poll` makes at most one immediate attempt. Do not run manual wait/poll
+while the bridge owns the ship's local-delivery selector lock.
+`radio status "$KIND" "$SOURCE_ID"`
 is a body-free local lookup.
 
 Transport unavailability is retryable; authentication, protocol, maintenance,

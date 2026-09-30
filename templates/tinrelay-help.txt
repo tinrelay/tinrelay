@@ -45,6 +45,7 @@ Radio reception:
   tinrelay --ship SHIP radio wait
   tinrelay --ship SHIP radio wait --local
   tinrelay --ship SHIP radio poll
+  tinrelay --ship SHIP radio poll --local
   tinrelay --ship SHIP radio status KIND SOURCE_ID
   tinrelay --ship SHIP radio routed KIND SOURCE_ID
 
