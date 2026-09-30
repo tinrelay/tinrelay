@@ -61,7 +61,7 @@ export class Adapter {
     requireValue(signed && signed.transmission_id === pointer.source_id &&
       source.recipient_ship === this.config.ship && signed.recipient_ship === this.config.ship &&
       source.sender_ship === signed.sender_ship && source.attention_label === pointer.name &&
-      signed.to_label === pointer.name && source.author_label === signed.from_label);
+      signed.to_label === pointer.name && source.author_label === (signed.from_label ?? null));
     const event = {eventId: `tinrelay:${this.config.ship}:transmission:${pointer.source_id}`,
       name: EVENT_NAME, timestamp: new Date(source.received_at * 1000).toISOString(), data: {
         contract: 'tinrelay-message-delivery-v2', kind: 'transmission',

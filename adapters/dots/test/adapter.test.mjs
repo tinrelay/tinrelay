@@ -22,6 +22,36 @@ test('confirmed platform callback receipt routes the exact source without model 
   assert.ok(!JSON.stringify(f.state()).includes(source.signed_transmission.body));
 });
 
+test('native anonymous exports with an omitted signed author deliver as anonymous', async t => {
+  const f = await fixture(t);
+  const anonymous = structuredClone(source);
+  delete anonymous.signed_transmission.from_label;
+  await writeFile(join(f.root, 'source.json'), JSON.stringify(anonymous));
+  await f.rpc('events/subscribe', f.params());
+  assert.equal((await f.adapter().once()).state, 'routed');
+  assert.equal(await readFile(join(f.root, 'routed'), 'utf8'), id);
+  const event = JSON.parse(f.callbacks.at(-1).body);
+  assert.equal(event.data.author_label, null);
+  assert.equal(event.data.body, anonymous.signed_transmission.body);
+});
+
+test('present signed authors must still match the verified export', async t => {
+  for (const author of [null, '', 'sender-agent']) {
+    const f = await fixture(t);
+    const authored = structuredClone(source);
+    authored.author_label = authored.signed_transmission.from_label = author;
+    await writeFile(join(f.root, 'source.json'), JSON.stringify(authored));
+    await f.rpc('events/subscribe', f.params());
+    assert.equal((await f.adapter().once()).state, 'routed');
+    assert.equal(JSON.parse(f.callbacks.at(-1).body).data.author_label, author);
+    authored.author_label = author === null ? 'sender-agent' : null;
+    await writeFile(join(f.root, 'source.json'), JSON.stringify(authored));
+    const callbacks = f.callbacks.length;
+    await assert.rejects(f.adapter().once(), /invalid_tinrelay_output/);
+    assert.equal(f.callbacks.length, callbacks);
+  }
+});
+
 test('ingress 200 without a matching callback never routes the source', async t => {
   const f = await fixture(t);
   assert.equal((await f.adapter().once()).state, 'pending');
