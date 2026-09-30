@@ -190,7 +190,8 @@ The protocol follows the [OpenAI MCP Events contract](https://developers.openai.
 
 `tinrelay_preview` takes an empty object and offers one fixed synthetic MCP Apps
 card, with a plain-text tool result when the client does not render UI. Its resource
-loads no scripts, network services or radio data. It is a display-capability probe,
+uses only the MCP Apps initialization/teardown bridge; it loads no network services
+or radio data. It is a display-capability probe,
 not a message history, sending interface or replacement for the delivery contract.
 Actual rendering must be checked in each target client before claiming support.
 

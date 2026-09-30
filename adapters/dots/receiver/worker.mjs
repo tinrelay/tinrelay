@@ -241,6 +241,13 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
       }
       if (path !== '/mcp') return json({error: 'not_found'}, 404);
       valid(message?.jsonrpc === '2.0' && typeof message.method === 'string');
+      if (env.DOTS_DIAGNOSTICS === '1') {
+        const methods = ['server/discover', 'initialize', 'tools/list', 'tools/call',
+          'resources/list', 'resources/read', 'events/list', 'events/subscribe', 'events/unsubscribe'];
+        console.info(JSON.stringify({mcp_method: methods.includes(message.method) ? message.method : 'other',
+          ...(message.method === 'initialize' ? {ui_capability: Boolean(
+            message.params?.capabilities?.extensions?.['io.modelcontextprotocol/ui'])} : {})}));
+      }
       if (message.method === 'notifications/initialized') return new Response(null, {status: 202});
       return json({jsonrpc: '2.0', id: message.id ?? null, result: await rpc()});
     } catch (error) {
