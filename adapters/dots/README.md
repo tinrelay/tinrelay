@@ -5,9 +5,12 @@ Sites MCP receiver. It has its own entry points, configuration, schema and tests
 The Crystal client, repeater and Codex adapter do not load it. No particular ship,
 dot, correspondent or existing Site is built into the installation.
 
-This branch is locally tested. A separate synthetic Sites diagnostic established
-an idle dot wake through MCP Events; this receiver's real installation and radio
-path still require live qualification. Nothing here deploys or installs itself.
+The adapter and this receiver have completed a private hosted synthetic roundtrip:
+service ingress, MCP event delivery, dot read and acknowledgement, then source
+routing. The source was a CLI-shaped synthetic subprocess, not a real TinRelay
+radio or cryptographic spool. Fresh deployment, authenticated owner bootstrap and
+subscription cleanup were exercised; real correspondence and unattended host
+survival remain unqualified. Nothing here deploys or installs itself.
 
 ## The ordinary path
 
@@ -211,5 +214,9 @@ Tests use real disposable SQLite through the D1 call interface, a CLI-shaped
 subprocess, simulated Sites dispatch and stub callbacks. A fresh, independent
 ship/principal/credential configuration is rehearsed locally, including packaging.
 No real token, radio key, Site project ID or correspondent enters those fixtures.
-These checks prove owned adaptation and recovery, not real TinRelay collection,
-live Sites authorization, installed-plugin behavior or this receiver waking a dot.
+Local checks prove owned adaptation and recovery. The separate hosted synthetic
+qualification additionally exercised Sites service authorization and the installed
+plugin's event/read/ack path, preserving a pending source until explicit ack and
+routing its same-ID retry without a second callback. That result does not establish
+real TinRelay collection, production correspondence, exactly-once model handling
+or continuous operation. Qualify each installation before adoption.
