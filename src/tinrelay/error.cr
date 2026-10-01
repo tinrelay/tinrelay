@@ -11,6 +11,15 @@ module Tinrelay
   class Conflict < Error
   end
 
+  class ContactPinRequired < Error
+    def initialize
+      super(
+        "local contact pin is missing; relay ciphertext was not acknowledged; " +
+        "recover trust with a verified hail and explicit contact allow, then retry reception"
+      )
+    end
+  end
+
   class RadioWaitReconnect < Conflict
     def initialize
       super("relay radio wait must reconnect")

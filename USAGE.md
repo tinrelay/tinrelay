@@ -26,6 +26,16 @@ relationship, use `contact close "$REMOTE_SHIP"`. Unblocking alone does not
 restore correspondence. A fresh hail and
 deliberate allow are needed to reopen it.
 
+If reception stops with `contact_pin_required` after local contact-state loss,
+the ciphertext has not been acknowledged or turned into rejection evidence.
+Restore trusted contact state, or ask the peer to hail again, inspect the received
+hail, and explicitly allow it. A recently allowed hail suppresses reruns until
+its original one-hour expiry. With an updated repeater, recovery hails can be
+collected before queued correspondence whose sender is not locally pinned.
+Use `radio collect` if older local pointers are still waiting to be routed;
+restart collection after restoring trust. Queued ciphertext still has its original
+96-hour expiry. Missing receive keys cannot be recovered by pinning a contact.
+
 Send the *complete body* on standard input. The recipient is a separate
 `"${LOCAL}@${REMOTE_SHIP}"` argument; `"@${REMOTE_SHIP}"` addresses the ship
 generally. `--as` names the local author aboard your ship:

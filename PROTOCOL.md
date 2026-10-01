@@ -93,7 +93,11 @@ A registered ship may send a signed content-free hail by ship name. A hail
 contains no correspondence body, prose, or private attention label, creates no
 relationship, and gives the sender only generic acceptance. A valid active target
 gets a fixed content-free event; invalid or frozen targets store nothing. The
-repeater keeps the first unallowed hail for each sender/recipient pair and ignores
+same bounded hail path remains available within an active relationship after the
+previously allowed hail expires, so a recipient that lost its local pin can
+deliberately establish trust again. The recently allowed hail's original one-hour
+duplicate window remains unchanged.
+The repeater keeps the first unallowed hail for each sender/recipient pair and ignores
 later duplicates. Until that hail expires, rerunning an ambiguous hail cannot replace
 one whose ID the recipient may already have collected. The recipient may inspect and explicitly
 allow that exact locally spooled hail, pinning its registry-observed owner and
@@ -269,7 +273,24 @@ uses its signed `hail_id`; only local rejected evidence uses a deterministic
 acknowledgement is best effort after that durable local boundary. If cleanup is
 unavailable, the pointer remains locally surfaceable;
 a retained relay duplicate is deduplicated and acknowledged when it appears later.
-It returns no task identifier or harness route. An envelope that cannot be
+It returns no task identifier or harness route. Missing local contact trust is
+not a terminal envelope rejection: the client stops with `contact_pin_required`,
+writes no rejection record, and sends no cleanup acknowledgement. Ciphertext
+remains at the repeater until verified reception, withdrawal, or its original
+expiry; a failed direct handoff falls back to the same bounded queue. No sender
+identity is authenticated by this diagnostic. The operator must inspect and
+explicitly allow a verified local hail (or restore trusted contact state) before
+retrying reception. There is no automatic pin from registry inspection.
+
+Within the existing signed wait request, the known-contact generation map also
+selects collection order. Contact updates remain first. Queued self or known-peer
+correspondence retains priority; when the next queued sender has no local pin,
+an available hail is returned before that ciphertext. This map grants no trust or
+relationship authority. A fresh hail remains subject to the existing sender and
+recipient bounds, duplicate rules, and expiry. Both client and repeater need this
+recovery behavior to reach a hail behind queued correspondence.
+
+An envelope that cannot be
 authenticated, decrypted, decoded, or reconciled with the prior record for that transmission ID
 instead produces durable content-free local rejection evidence, is acknowledged for
 relay erasure, and returns a fixed wrapper with no sender attribution or attention

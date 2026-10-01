@@ -91,11 +91,16 @@ module Tinrelay
         )
         next RadioWaitResponse.new(contact_updates: updates) unless updates.empty?
         envelope = pending_envelope(connection, request.auth.ship, now)
-        next RadioWaitResponse.new(envelope: envelope) if envelope
+        if envelope && (envelope.sender_ship == request.auth.ship ||
+           request.known_contact_generations.has_key?(envelope.sender_ship))
+          next RadioWaitResponse.new(envelope: envelope)
+        end
+        # Unknown local trust must not force destructive reception before a
+        # recovery hail can be collected. The signed map selects order, not trust.
         hail = pending_hail(
           connection, request.auth.ship, request.known_contact_generations, now
         )
-        RadioWaitResponse.new(hail: hail)
+        hail ? RadioWaitResponse.new(hail: hail) : RadioWaitResponse.new(envelope: envelope)
       end.not_nil!
     end
 

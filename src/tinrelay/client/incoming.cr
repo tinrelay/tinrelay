@@ -162,7 +162,6 @@ module Tinrelay
       unless envelope.recipient_ship == keyring.data.ship
         raise Unauthorized.new("radio returned a transmission for another ship")
       end
-      recipient = keyring.data.radio!(envelope.recipient_encryption_generation)
       contact = keyring.data.contacts.find { |item| item.ship == envelope.sender_ship }
       self_transmission = envelope.sender_ship == keyring.data.ship
       certificate, owner_generation, owner_public, owner_chain = receive_identity(
@@ -171,6 +170,7 @@ module Tinrelay
         self_transmission,
         document
       )
+      recipient = keyring.data.radio!(envelope.recipient_encryption_generation)
       unless Crypto.verify(
                envelope.signing_bytes, Crypto.unb64(envelope.signature),
                Crypto.unb64(certificate.signing_public_key)
@@ -231,7 +231,9 @@ module Tinrelay
           owner_chain_evidence(document, contact, owner_generation),
         }
       else
-        raise Unauthorized.new("sender ship is not pinned locally")
+        # Missing local trust is recoverable, not evidence of a bad envelope.
+        # Do not spool a rejection or authorize destructive relay cleanup.
+        raise ContactPinRequired.new
       end
     end
 

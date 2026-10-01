@@ -330,6 +330,35 @@ describe "tinrelay sent and withdrawal CLI" do
 end
 
 describe "tinrelay nested contact commands" do
+  it "reports missing contact trust without acknowledging queued correspondence" do
+    TinrelaySpec.with_server do |root, origin, api|
+      home = File.join(root, "home")
+      paths = Tinrelay::LocalPaths.new("alpha", home)
+      alpha = Tinrelay::Client.join(paths.keyring, origin, "alpha", paths.owner_key)
+      beta = TinrelaySpec.admit_contact(root, origin, "beta", alpha)
+      sent = beta.send("steward@alpha", "private recovery fixture")
+      alpha.keyring.data.contacts.clear
+      alpha.keyring.save
+
+      result, output, diagnostic = TinrelayCliSpec.run(
+        ["--ship", "alpha", "--proxy", "", "radio", "poll"], "", home
+      )
+
+      result.exit_code.should eq(2)
+      output.should be_empty
+      JSON.parse(diagnostic)["error"].as_s.should eq("contact_pin_required")
+      diagnostic.should_not contain("beta")
+      diagnostic.should_not contain("private recovery fixture")
+      diagnostic.should_not contain(sent.transmission_id)
+      Tinrelay::Spool.new(paths.spool).list.should be_empty
+      Tinrelay::Keyring.load(paths.keyring).data.contacts.should be_empty
+      api.database.db.query_one(
+        "SELECT state, ciphertext IS NOT NULL FROM transmissions WHERE id = ?",
+        sent.transmission_id, as: {String, Int64}
+      ).should eq({"pending", 1_i64})
+    end
+  end
+
   it "allows, closes, and unblocks the authenticated peer from a local hail ID" do
     TinrelaySpec.with_server do |root, origin, api|
       home = File.join(root, "home")
