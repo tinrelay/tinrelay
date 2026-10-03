@@ -18,6 +18,23 @@ module TinrelayDatabaseSchemaSpec
 end
 
 describe "the relay database schema" do
+  it "uses memory for temporary storage on every pooled connection" do
+    root = TinrelaySpec.temporary_root
+    database = Tinrelay::Database.new(File.join(root, "temporary.db"), max_connections: 2)
+    database.db.using_connection do |first|
+      database.db.using_connection do |second|
+        first.scalar("PRAGMA temp_store").should eq(2_i64)
+        second.scalar("PRAGMA temp_store").should eq(2_i64)
+        second.scalar("PRAGMA foreign_keys").should eq(1_i64)
+        second.scalar("PRAGMA synchronous").should eq(2_i64)
+        second.scalar("PRAGMA journal_mode").should eq("wal")
+      end
+    end
+  ensure
+    database.try(&.close)
+    FileUtils.rm_r(root) if root && Dir.exists?(root)
+  end
+
   it "stores only the protocol-owned fields for keys, hails, relationships, and transmissions" do
     root = TinrelaySpec.temporary_root
     database = Tinrelay::Database.new(File.join(root, "schema.db"))

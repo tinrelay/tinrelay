@@ -20,13 +20,20 @@ Run the service as UID/GID 10001 with a read-only root filesystem, all Linux
 capabilities dropped, `no-new-privileges`, and a writable persistent volume only
 at `/var/lib/tinrelay`. Terminate TLS at the trusted edge.
 
+SQLite uses in-memory temporary storage on every pooled connection, so populated
+schema upgrades need no writable `/tmp`. The persistent database and WAL retain
+their existing full-synchronization and foreign-key settings.
+
 The trusted edge routes API requests to `tinrelayd`. Public HTML and the First
 Light journey are built and served independently by `tinrelay-site`.
 
 `script/verify-container` is the executable packaging proof. It builds the real
 `linux/amd64` image, prepares an isolated volume, starts the service under the
 restrictions above, waits for readiness, checks shutdown and database ownership,
-audits the final filesystem, and removes its disposable Docker state:
+audits the final filesystem, and removes its disposable Docker state. It also
+upgrades synthetic populated schema 003 under the same one-CPU/one-GiB read-only
+runtime, compares all retained rows/indexes/foreign keys, and reopens schema 004.
+Fixture tooling runs only in the build stage, never in the scratch runtime:
 
 ```sh
 script/verify-container

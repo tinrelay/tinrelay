@@ -4,6 +4,7 @@ set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 suffix=$$
 image="tinrelay-container-check:$suffix"
+builder="tinrelay-container-fixture:$suffix"
 volume="tinrelay-container-check-$suffix"
 container="tinrelay-container-check-$suffix"
 scratch=$(mktemp -d)
@@ -13,6 +14,7 @@ cleanup() {
   docker container rm --force "$container" >/dev/null 2>&1 || true
   docker volume rm "$volume" >/dev/null 2>&1 || true
   docker image rm "$image" >/dev/null 2>&1 || true
+  docker image rm "$builder" >/dev/null 2>&1 || true
   rm -rf "$scratch"
 }
 trap cleanup EXIT HUP INT TERM
@@ -23,6 +25,17 @@ docker buildx build \
   --load \
   --tag "$image" \
   "$root"
+
+# Run fixture tooling in the same Linux build stage; the runtime image stays scratch-only.
+docker buildx build --platform linux/amd64 --target build \
+  --build-arg "TINRELAY_BUILD_LABEL=$build_label" --load --tag "$builder" "$root"
+docker run --rm --platform linux/amd64 \
+  --mount "type=bind,source=$root/script/container-migration-fixture.cr,target=/build/fixture.cr,readonly" \
+  --mount "type=bind,source=$scratch,target=/fixture" \
+  "$builder" crystal build fixture.cr --release --no-debug -o /fixture/migration-fixture
+docker run --rm --platform linux/amd64 \
+  --mount "type=bind,source=$scratch,target=/fixture" \
+  "$builder" /fixture/migration-fixture seed /fixture/tinrelay.db
 
 docker volume create "$volume" >/dev/null
 docker run --rm \
@@ -47,29 +60,39 @@ case "$version" in
 esac
 [ "${version##* build }" = "$build_label" ]
 
-docker run --detach \
-  --name "$container" \
-  --platform linux/amd64 \
-  --user 10001:10001 \
-  --read-only \
-  --cap-drop ALL \
-  --security-opt no-new-privileges \
-  --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
-  --publish 127.0.0.1::8787 \
-  "$image" >/dev/null
+start_repeater() {
+  docker run --detach \
+    --name "$container" \
+    --platform linux/amd64 \
+    --user 10001:10001 \
+    --cpus 1 \
+    --memory 1g \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
+    --publish 127.0.0.1::8787 \
+    "$image" serve --threads 1 >/dev/null
 
-port=$(docker port "$container" 8787/tcp | sed -n 's/.*://p')
-[ -n "$port" ]
-attempt=0
-until curl --fail --silent --show-error "http://127.0.0.1:$port/readyz" \
-  | grep -Fq '"status":"ready"'; do
-  attempt=$((attempt + 1))
-  if [ "$attempt" -ge 60 ]; then
-    docker logs "$container" >&2
-    exit 1
-  fi
-  sleep 1
-done
+  port=$(docker port "$container" 8787/tcp | sed -n 's/.*://p')
+  [ -n "$port" ]
+  attempt=0
+  until curl --fail --silent --show-error "http://127.0.0.1:$port/readyz" \
+    | grep -Fq '"status":"ready"'; do
+    attempt=$((attempt + 1))
+    if [ "$(docker inspect "$container" --format '{{.State.Running}}')" = false ]; then
+      docker logs "$container" >&2
+      exit 1
+    fi
+    if [ "$attempt" -ge 60 ]; then
+      docker logs "$container" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
+start_repeater
 
 curl --fail --silent --show-error \
   --dump-header "$scratch/metrics.headers" \
@@ -101,6 +124,36 @@ database=$(docker run --rm \
   --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
   "$image" stat -c '%u:%g:%a' /var/lib/tinrelay/tinrelay.db)
 [ "$database" = "10001:10001:600" ]
+
+# Upgrade an existing populated v3 database under the exact same runtime restrictions.
+docker container rm "$container" >/dev/null
+docker run --rm --platform linux/amd64 --entrypoint /bin/busybox \
+  --mount "type=bind,source=$scratch,target=/fixture,readonly" \
+  --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
+  "$image" sh -eu -c '
+    test ! -e /var/lib/tinrelay/tinrelay.db-wal
+    cp /fixture/tinrelay.db /var/lib/tinrelay/tinrelay.db
+    chown 10001:10001 /var/lib/tinrelay/tinrelay.db
+    chmod 0600 /var/lib/tinrelay/tinrelay.db
+  '
+start_repeater
+curl --fail --silent --show-error "http://127.0.0.1:$port/metrics" \
+  | grep -F 'tinrelay_registered_ships{state="active"} 12' >/dev/null
+docker stop --time 10 "$container" >/dev/null
+[ "$(docker inspect "$container" --format '{{.State.ExitCode}}')" = 0 ]
+docker run --rm --platform linux/amd64 --entrypoint /bin/busybox \
+  --mount "type=bind,source=$scratch,target=/fixture" \
+  --mount "type=volume,source=$volume,target=/var/lib/tinrelay,readonly" \
+  "$image" cp /var/lib/tinrelay/tinrelay.db /fixture/tinrelay.db
+docker run --rm --platform linux/amd64 \
+  --mount "type=bind,source=$scratch,target=/fixture" \
+  "$builder" /fixture/migration-fixture verify /fixture/tinrelay.db
+
+# Reopen the upgraded store without a writable temporary directory.
+docker run --rm --platform linux/amd64 --user 10001:10001 --read-only \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
+  "$image" migrate --database /var/lib/tinrelay/tinrelay.db
 
 docker run --rm --platform linux/amd64 --entrypoint /bin/busybox "$image" sh -eu -c '
   test -x /usr/local/bin/tinrelayd

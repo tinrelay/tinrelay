@@ -24,6 +24,10 @@ module Tinrelay
             "foreign_keys=on&" +
             "max_pool_size=#{max_connections}"
       @db = DB.open(uri)
+      # Scratch has no writable temp directory; keep SQLite's temporary work in memory.
+      @db.setup_connection do |connection|
+        connection.exec("PRAGMA temp_store=MEMORY")
+      end
       File.chmod(path, 0o600) if File.exists?(path)
       configure
       migrate
