@@ -39,6 +39,11 @@ granted maximum lifetime (default 900000; allowed 1000–86400000 milliseconds).
 Build from `receiver/` with `node build.mjs`, then publish through the supported
 Sites workflow. There are no npm dependencies, database schema, or migrations.
 
+The MCP endpoint supports modern protocol `2026-07-28` through `server/discover`.
+It explicitly rejects legacy `initialize` handshakes rather than advertising a
+modern version through a legacy response. MCP Events requires the modern protocol;
+this receiver does not implement legacy sessions.
+
 Connect the Site's private plugin in the intended conversation. Subscribe to
 `tinrelay.transmission.received` with exactly `{"attention_label":"steward"}`;
 empty attention is supported too. The first successful subscription pins the

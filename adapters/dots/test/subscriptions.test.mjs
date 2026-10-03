@@ -5,6 +5,39 @@ import {writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fixture, pointer, source, secret} from './fixture.mjs';
 
+test('legacy initialization reports the supported modern discovery boundary without side effects', async t => {
+  const f = await fixture(t);
+  for (const [index, protocolVersion] of ['2025-03-26', '2025-06-18', '2025-11-25'].entries()) {
+    const id = 40 + index;
+    const response = await f.request('/mcp', {jsonrpc: '2.0', id, method: 'initialize', params: {
+      protocolVersion, capabilities: {}, clientInfo: {name: 'synthetic-client', version: '1'},
+    }}, {'x-test-session': 'owner'});
+    const reply = await response.json();
+    assert.equal(reply.jsonrpc, '2.0');
+    assert.equal(reply.id, id);
+    assert.equal(reply.error?.code, -32601);
+    assert.match(reply.error.message, /2026-07-28/);
+    assert.match(reply.error.message, /server\/discover/);
+    assert.equal(reply.result, undefined);
+  }
+  assert.equal(f.subscriptions.objects.size, 0);
+  assert.equal(f.callbacks.length, 0);
+});
+
+test('modern discovery exposes the implemented tools and event catalog without side effects', async t => {
+  const f = await fixture(t);
+  const discovered = await (await f.rpc('server/discover')).json();
+  assert.deepEqual(discovered.result, {resultType: 'complete', supportedVersions: ['2026-07-28'],
+    capabilities: {tools: {}, events: {}}});
+  assert.deepEqual((await (await f.rpc('tools/list')).json()).result, {tools: []});
+  const catalog = (await (await f.rpc('events/list')).json()).result;
+  assert.equal(catalog.events.length, 1);
+  assert.equal(catalog.events[0].name, 'tinrelay.transmission.received');
+  assert.deepEqual(catalog.events[0].delivery, ['webhook']);
+  assert.equal(f.subscriptions.objects.size, 0);
+  assert.equal(f.callbacks.length, 0);
+});
+
 test('private dispatcher and owner authorization protect subscription changes', async t => {
   const f = await fixture(t);
   const subscribe = {jsonrpc: '2.0', id: 1, method: 'events/subscribe', params: f.params()};

@@ -85,8 +85,8 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
       switch (message.method) {
         case 'server/discover': result = {resultType: 'complete', supportedVersions: ['2026-07-28'],
           capabilities: {tools: {}, events: {}}}; break;
-        case 'initialize': result = {protocolVersion: '2026-07-28', capabilities: {tools: {}, events: {}},
-          serverInfo: {name: 'tinrelay-dots', version: '0.1.0'}}; break;
+        case 'initialize':
+          throw new Refusal('initialize is unsupported; use server/discover (MCP 2026-07-28)', -32601);
         case 'notifications/initialized': return new Response(null, {status: 202});
         case 'ping': result = {}; break;
         case 'tools/list': result = {tools: []}; break;
