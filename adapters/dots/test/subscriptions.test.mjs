@@ -29,7 +29,8 @@ test('modern discovery exposes the implemented tools and event catalog without s
   const discovered = await (await f.rpc('server/discover')).json();
   assert.deepEqual(discovered.result, {resultType: 'complete', supportedVersions: ['2026-07-28'],
     capabilities: {tools: {}, events: {}}});
-  assert.deepEqual((await (await f.rpc('tools/list')).json()).result, {tools: []});
+  assert.deepEqual((await (await f.rpc('tools/list')).json()).result,
+    {resultType: 'complete', ttlMs: 0, cacheScope: 'private', tools: []});
   const catalog = (await (await f.rpc('events/list')).json()).result;
   assert.equal(catalog.events.length, 1);
   assert.equal(catalog.events[0].name, 'tinrelay.transmission.received');

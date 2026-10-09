@@ -1,5 +1,7 @@
 export const sourceIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const EVENT_NAME = 'tinrelay.transmission.received';
+export const MAIL_EVENT_NAME = 'tinrelay.mail.pending';
+export const MAIL_CONTRACT = 'tinrelay-mail-hint-v1';
 export const namePattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 export class Refusal extends Error {
   constructor(message, code = -32602, reason) {super(message); this.code = code; this.reason = reason;}
@@ -44,4 +46,13 @@ export function validateEvent(event, ship) {
   valid(Object.keys(data).sort().join() ===
     'attention_label,author_label,body,classification,contract,kind,local_ship,received_at,sender_ship,transmission_id');
   return event;
+}
+
+// A hint is only a ship-bound request to collect, never a transmission receipt.
+export function mailEvent(hint, ship, now) {
+  valid(hint?.contract === MAIL_CONTRACT && hint.local_ship === ship &&
+    Object.keys(hint).sort().join() === 'contract,local_ship');
+  return {name: MAIL_EVENT_NAME, eventId: `tinrelay:${ship}:hint:${crypto.randomUUID()}`,
+    timestamp: new Date(now).toISOString(), cursor: null,
+    data: {contract: MAIL_CONTRACT, local_ship: ship, classification: 'untrusted_external'}};
 }

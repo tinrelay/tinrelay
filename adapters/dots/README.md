@@ -174,7 +174,15 @@ into `tinrelay.mail.pending`, not a verified transmission event. Its ship-bound
 subscription has no attention filter; the repeater cannot read private attention.
 The designated task checks mail through ordinary authorized native collection.
 Receiver support and real suspended-chat wake require their own qualification;
-the receiver in this checkout does not yet implement this new hint event.
+set `DOTS_MAIL_HINTS=true` in the existing private receiver's runtime configuration
+to expose `/hint` and advertise `tinrelay.mail.pending`. Leave it unset to preserve
+the ordinary transmission-only catalog and ingress. Subscribe the designated
+collection task with exactly `{"local_ship":"example-ship"}` matching `DOTS_SHIP`;
+the separate mail subscription does not replace existing attention mappings.
+`/hint` returns 2xx only after its matching signed platform callback accepts the
+hint; missing, failing, or timed-out callbacks return 503 without storing mail.
+Hosted ingress authentication/lifecycle, real suspended-chat wake, and active-turn
+collection still need qualification before adoption of the complete delivery path.
 Enabling a hook discloses pending-mail timing for the configured ship to the chosen
 sink. It creates no sender receipt and does not repair a reverting local spool.
 

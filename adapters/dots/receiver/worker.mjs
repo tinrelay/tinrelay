@@ -1,4 +1,5 @@
-import {EVENT_NAME, namePattern, Refusal, readJSON, valid, validateEvent} from './event.mjs';
+import {EVENT_NAME, MAIL_EVENT_NAME, MAIL_CONTRACT, mailEvent, namePattern, Refusal,
+  readJSON, valid, validateEvent} from './event.mjs';
 
 const encoder = new TextEncoder();
 const json = (body, status = 200) => Response.json(body, {status,
@@ -28,14 +29,39 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
     const path = new URL(request.url).pathname;
     const principal = request.headers.get('oai-authenticated-user-id');
     let message;
+    const traceMcp = (result, errorCode) => {
+      const knownMethods = ['server/discover', 'initialize', 'notifications/initialized', 'ping',
+        'tools/list', 'tools/call', 'events/list', 'events/subscribe', 'events/unsubscribe',
+        'resources/list', 'resources/templates/list', 'resources/read', 'prompts/list',
+        'prompts/get', 'skills/list', 'logging/setLevel'];
+      const method = knownMethods.includes(message?.method) ? message.method : 'unknown';
+      const summary = {method, outcome: errorCode === undefined ? 'success' : 'error'};
+      if (errorCode !== undefined) summary.error_code = errorCode;
+      if (method === 'initialize') {
+        const requested = message?.params?.protocolVersion;
+        if (typeof requested === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(requested)) {
+          summary.requested_protocol_version = requested;
+        }
+        if (result?.protocolVersion === '2026-07-28') summary.returned_protocol_version = '2026-07-28';
+      }
+      console.info(JSON.stringify(summary));
+    };
     try {
       const ship = env.DOTS_SHIP;
       const ttl = Number(env.DOTS_SUBSCRIPTION_TTL_MS ?? 900_000);
       valid(typeof ship === 'string' && namePattern.test(ship), 'invalid_ship_configuration');
       valid(Number.isSafeInteger(ttl) && ttl >= 1000 && ttl <= 86_400_000, 'invalid_configuration');
       if (request.method !== 'POST') return json({error: 'method_not_allowed'}, 405);
-      if (!['/mcp', '/deliver'].includes(path)) return json({error: 'not_found'}, 404);
-      message = await readJSON(request.body);
+      const mailEnabled = env.DOTS_MAIL_HINTS === 'true';
+      if (!['/mcp', '/deliver', ...(mailEnabled ? ['/hint'] : [])].includes(path)) {
+        return json({error: 'not_found'}, 404);
+      }
+      try {message = await readJSON(request.body, path === '/hint' ? 1024 : undefined);} catch (error) {
+        if (path === '/hint' && (error instanceof SyntaxError || error instanceof TypeError)) {
+          throw new Refusal('invalid_request');
+        }
+        throw error;
+      }
       const key = `tinrelay-dots/${ship}.json`;
       const object = await env.SUBSCRIPTIONS.get(key);
       const state = object ? await object.json() : {owner: null, subscriptions: []};
@@ -65,9 +91,20 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
             'webhook-id': id, 'webhook-timestamp': timestamp, 'webhook-signature': signatures.join(' '),
             'X-MCP-Subscription-Id': sub.id}});
       }
+      if (path === '/hint') {
+        const event = mailEvent(message, ship, clock());
+        const sub = active.find(value => value.event === MAIL_EVENT_NAME);
+        if (!sub) return json({state: 'pending'}, 503);
+        try {
+          const response = await callback(sub, event.eventId, JSON.stringify(event));
+          await response.body?.cancel();
+          // Receipt only completes this hint attempt. No radio state is accessible here.
+          return json({state: response.ok ? 'received' : 'pending'}, response.ok ? 200 : 503);
+        } catch {return json({state: 'pending'}, 503);}
+      }
       if (path === '/deliver') {
         validateEvent(message, ship);
-        const sub = active.find(value => value.attention === message.data.attention_label);
+        const sub = active.find(value => !value.event && value.attention === message.data.attention_label);
         if (!sub) return json({event_id: message.eventId, state: 'pending'});
         const response = await callback(sub, message.eventId, JSON.stringify(message));
         await response.body?.cancel();
@@ -87,25 +124,40 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
           capabilities: {tools: {}, events: {}}}; break;
         case 'initialize':
           throw new Refusal('initialize is unsupported; use server/discover (MCP 2026-07-28)', -32601);
-        case 'notifications/initialized': return new Response(null, {status: 202});
+        case 'notifications/initialized': traceMcp({}); return new Response(null, {status: 202});
         case 'ping': result = {}; break;
-        case 'tools/list': result = {tools: []}; break;
+        case 'tools/list': result = {ttlMs: 0, cacheScope: 'private',
+          tools: []}; break;
         case 'events/list': result = {events: [{name: EVENT_NAME,
           description: 'Untrusted external correspondence received by this ship.', delivery: ['webhook'],
           inputSchema: filterSchema, payloadSchema: {type: 'object', properties: {
             classification: {const: 'untrusted_external'}, body: {type: 'string'}},
-            required: ['classification', 'body']}}]}; break;
+            required: ['classification', 'body']}}, ...(mailEnabled ? [{name: MAIL_EVENT_NAME,
+          description: 'Untrusted ship-level hint to collect pending radio work; not a receipt.',
+          delivery: ['webhook'], inputSchema: {type: 'object',
+            properties: {local_ship: {const: ship}}, required: ['local_ship'],
+            additionalProperties: false}, payloadSchema: {type: 'object', properties: {
+              contract: {const: MAIL_CONTRACT}, local_ship: {const: ship},
+              classification: {const: 'untrusted_external'}},
+            required: ['contract', 'local_ship', 'classification'], additionalProperties: false}}] : [])]};
+          break;
         case 'events/subscribe':
         case 'events/unsubscribe': {
           if (!principal) return json({error: 'authenticated_user_required'}, 401);
           if (state.owner && state.owner !== principal) return json({error: 'owner_required'}, 403);
-          valid(params.name === EVENT_NAME && params.delivery?.mode === 'webhook');
+          const mail = mailEnabled && params.name === MAIL_EVENT_NAME;
+          valid((mail || params.name === EVENT_NAME) && params.delivery?.mode === 'webhook');
           const attention = params.arguments?.attention_label;
-          valid(typeof attention === 'string' && (attention === '' || namePattern.test(attention)) &&
+          if (mail) valid(params.arguments?.local_ship === ship &&
             Object.keys(params.arguments).length === 1);
+          else valid(typeof attention === 'string' && (attention === '' || namePattern.test(attention)) &&
+            Object.keys(params.arguments).length === 1);
+          const matches = value => mail ? value.event === MAIL_EVENT_NAME :
+            !value.event && value.attention === attention;
           const url = callbackURL(params.delivery.url);
           const digest = await crypto.subtle.digest('SHA-256',
-            encoder.encode(JSON.stringify([ship, principal, url, attention])));
+            encoder.encode(JSON.stringify(mail ? [ship, principal, url, MAIL_EVENT_NAME, ship] :
+              [ship, principal, url, attention])));
           const id = 'sub_' + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
           if (message.method === 'events/unsubscribe') {
             valid(await save(active.filter(sub => sub.id !== id)), 'subscription_changed');
@@ -115,9 +167,11 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
           secretBytes(params.delivery.secret);
           const requested = params.ttlMs ?? ttl;
           valid(Number.isSafeInteger(requested) && requested > 0);
-          const previous = active.find(sub => sub.attention === attention);
-          valid(!previous || previous.id === id, 'attention_already_subscribed');
-          const sub = {id, attention, url, secret: params.delivery.secret};
+          const previous = active.find(matches);
+          valid(!previous || previous.id === id,
+            mail ? 'ship_already_subscribed' : 'attention_already_subscribed');
+          const sub = {id, ...(mail ? {event: MAIL_EVENT_NAME} : {attention}),
+            url, secret: params.delivery.secret};
           const challenge = crypto.randomUUID();
           let reason = 'timeout_or_transport';
           try {
@@ -132,19 +186,24 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
           Object.assign(sub, {expires,
             old_secret: changed ? previous.secret : previous?.old_secret ?? null,
             old_until: changed ? clock() + 60_000 : previous?.old_until ?? null});
-          valid(await save([...active.filter(value => value.attention !== attention), sub]),
+          valid(await save([...active.filter(value => !matches(value)), sub]),
             'subscription_changed');
           result = {id, refreshBefore: new Date(expires).toISOString(), cursor: null, truncated: false};
           break;
         }
         default: throw new Refusal('method_not_found', -32601);
       }
+      result = {resultType: 'complete', ...result};
+      traceMcp(result);
       return json({jsonrpc: '2.0', id: message.id ?? null, result});
     } catch (error) {
       const known = error instanceof Refusal;
-      if (path === '/mcp') return json({jsonrpc: '2.0', id: message?.id ?? null,
+      if (path === '/mcp') {
+        traceMcp(undefined, known ? error.code : -32603);
+        return json({jsonrpc: '2.0', id: message?.id ?? null,
         error: {code: known ? error.code : -32603, message: known ? error.message : 'receiver_unavailable',
           ...(known && error.reason ? {data: {reason: error.reason}} : {})}});
+      }
       return json({error: known ? error.message : 'receiver_unavailable'}, known ? 400 : 503);
     }
   }};

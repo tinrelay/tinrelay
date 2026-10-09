@@ -51,6 +51,7 @@ module Tinrelay
       tls = OpenSSL::SSL::Socket::Client.new(socket,
         context: OpenSSL::SSL::Context::Client.new, hostname: host, sync_close: true)
       client = HTTP::Client.new(tls, host, port)
+      client.compress = false
       headers = HTTP::Headers{"Content-Type" => "application/json", "Connection" => "close"}
       headers[destination.auth_header] = destination.auth_value
       body = {contract: "tinrelay-mail-hint-v1", local_ship: destination.ship}.to_json

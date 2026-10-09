@@ -10,6 +10,8 @@ module TinrelayMailHintsSpec
     property gate : Channel(Nil)? = nil
     property drop = false
     property malformed = false
+    property encoding : String? = nil
+    property body_gate : Channel(Nil)? = nil
     @server : HTTP::Server
     @port : Int32
 
@@ -29,7 +31,18 @@ module TinrelayMailHintsSpec
         else
           http.response.status_code = status
           http.response.headers["Location"] = url if status == 302
-          http.response.print("synthetic-private-response")
+          if value = encoding
+            http.response.headers["Content-Encoding"] = value
+          end
+          if held = body_gate
+            http.response.content_length = 26
+            http.response.upgrade do |socket|
+              socket.flush
+              held.receive
+            end
+          else
+            http.response.print("synthetic-private-response")
+          end
         end
       end
       @port = @server.bind_tls("127.0.0.1", 0, context).port
@@ -75,6 +88,51 @@ module TinrelayMailHintsSpec
 end
 
 describe "operator-owned mail hints" do
+  it "accepts numeric status from a malformed compressed body without decoding it" do
+    TinrelayMailHintsSpec.with_sink do |sink|
+      TinrelaySpec.with_server do |root, origin, api|
+        alpha = TinrelaySpec.admit(root, origin, "alpha")
+        api.store.accept(TinrelayMailHintsSpec.envelope(root, alpha))
+        before = TinrelayMailHintsSpec.retained(api)
+        log = IO::Memory.new
+        hints = Tinrelay::MailHints.new(api.store, log: log)
+        %w[gzip deflate].each do |encoding|
+          sink.encoding = encoding
+          hints.notify([TinrelayMailHintsSpec.destination(sink.url)])
+        end
+        outcomes = log.to_s.lines.map { |line| JSON.parse(line)["outcome"].as_s }
+        outcomes.should eq(%w[accepted accepted])
+        sink.headers.each { |headers| headers["Accept-Encoding"]?.should be_nil }
+        TinrelayMailHintsSpec.retained(api).should eq(before)
+      end
+    end
+  end
+
+  it "accepts numeric status from flushed headers without waiting for a compressed body" do
+    TinrelayMailHintsSpec.with_sink do |sink|
+      TinrelaySpec.with_server do |root, origin, api|
+        alpha = TinrelaySpec.admit(root, origin, "alpha")
+        api.store.accept(TinrelayMailHintsSpec.envelope(root, alpha))
+        before = TinrelayMailHintsSpec.retained(api)
+        log = IO::Memory.new
+        held = Channel(Nil).new(1)
+        sink.body_gate = held
+        sink.encoding = "gzip"
+        begin
+          started = Time.instant
+          Tinrelay::MailHints.new(api.store, timeout: 500.milliseconds, log: log).notify(
+            [TinrelayMailHintsSpec.destination(sink.url)]
+          )
+          (Time.instant - started).should be < 250.milliseconds
+          JSON.parse(log.to_s)["outcome"].as_s.should eq("accepted")
+          TinrelayMailHintsSpec.retained(api).should eq(before)
+        ensure
+          held.send(nil)
+        end
+      end
+    end
+  end
+
   it "stops an old sweep after reload removes or replaces its next destination" do
     [false, true].each do |replace|
       TinrelayMailHintsSpec.with_sink do |old_sink|
