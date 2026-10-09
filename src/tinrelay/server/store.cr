@@ -76,6 +76,21 @@ module Tinrelay
       end.not_nil!
     end
 
+    # Operator-only queue truth. Reading never offers, collects, or acknowledges mail.
+    def pending_mail?(ship : String, now : Int64 = Time.utc.to_unix) : Bool
+      database.db.query_one(
+        <<-SQL, ship, ship, now, ship, now, as: Bool
+          SELECT EXISTS(SELECT 1 FROM ships WHERE name = ? AND state = 'active') AND (
+            EXISTS(SELECT 1 FROM transmissions
+                   WHERE recipient_ship = ? AND state = 'pending' AND expires_at > ?) OR
+            EXISTS(SELECT 1 FROM hails
+                   WHERE recipient_ship = ? AND collected_at IS NULL
+                     AND allowed_at IS NULL AND expires_at > ?)
+          )
+        SQL
+      )
+    end
+
     def wait_once(request : RadioWaitRequest,
                   now : Int64 = Time.utc.to_unix) : RadioWaitResponse
       unless request.hold_seconds.in?(0..RADIO_WAIT_HOLD_SECONDS)

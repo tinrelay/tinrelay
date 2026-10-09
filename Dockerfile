@@ -8,6 +8,7 @@ WORKDIR /build
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
       busybox-static \
+      ca-certificates \
       libsodium-dev \
       libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -32,6 +33,8 @@ RUN set -eu; \
     install -m 0555 /bin/busybox /runtime/bin/busybox; \
     install -m 0555 bin/tinrelayd /runtime/usr/local/bin/tinrelayd; \
     install -m 0555 /build/tinrelayd-entrypoint /runtime/usr/local/bin/tinrelayd-entrypoint; \
+    install -D -m 0444 /etc/ssl/certs/ca-certificates.crt \
+      /runtime/etc/ssl/certs/ca-certificates.crt; \
     ldd bin/tinrelayd \
       | awk '($3 ~ /^\//) { print $3 } ($1 ~ /^\//) { print $1 }' \
       | sort -u \
@@ -46,6 +49,8 @@ RUN set -eu; \
     chmod 0700 /runtime/var/lib/tinrelay
 
 FROM scratch
+
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 COPY --from=build /runtime/ /
 

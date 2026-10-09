@@ -23,14 +23,21 @@ module Tinrelay
     getter? request_logging : Bool
     @registration_deny_cidrs : Array(IPNetwork)
     @rate_limit_exclusions : Set(String)
+    @mail_hints : Array(MailHintDestination)
 
     def initialize(@registration_allowances,
                    registration_deny_cidrs : Array(IPNetwork),
                    @client_address_policy,
                    rate_limit_exclusions : Array(String),
-                   @request_logging)
+                   @request_logging,
+                   mail_hints = [] of MailHintDestination)
       @registration_deny_cidrs = registration_deny_cidrs.dup
       @rate_limit_exclusions = Set.new(rate_limit_exclusions)
+      @mail_hints = mail_hints.dup
+    end
+
+    def mail_hints : Array(MailHintDestination)
+      @mail_hints.dup
     end
 
     def registration_deny_cidrs : Array(IPNetwork)
@@ -159,6 +166,11 @@ module Tinrelay
 
     def close : Nil
       database.close
+    end
+
+    def mail_hints_once : Nil
+      snapshot = runtime_snapshot
+      MailHints.new(store).notify(snapshot.mail_hints, -> { runtime_snapshot.same?(snapshot) })
     end
 
     private def route(context : HTTP::Server::Context) : Int32
@@ -537,7 +549,8 @@ module Tinrelay
         candidate.try(&.client_address_policy) ||
         ClientAddressPolicy.new("direct", [] of String),
         candidate.try(&.rate_limit_exclusions) || [] of String,
-        candidate.try(&.logging.requests) != false
+        candidate.try(&.logging.requests) != false,
+        candidate.try(&.validated_mail_hints) || [] of MailHintDestination
       )
     end
   end

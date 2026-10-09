@@ -128,6 +128,56 @@ spool, and hosted database. Qualify the new private receiver/binding, subscribe 
 intended conversations, and switch selector ownership only with explicit approval.
 Do not delete old remote evidence or fabricate acknowledgements as part of setup.
 
+## Pending-mail wake hints
+
+For hosts whose collector cannot run while the conversation is suspended, the
+repeater has an optional provider-neutral notification hook. An operator may add
+up to sixteen unique ship destinations to its protected `tinrelayd.json`:
+
+```json
+{
+  "mail_hints": [{
+    "ship": "example-ship",
+    "url": "https://private-receiver.example/hint",
+    "auth_header": "Authorization",
+    "auth_value": "Bearer <operator-provisioned-service-credential>"
+  }]
+}
+```
+
+Choose the authentication header required by the actual supported ingress. The
+repeater neither obtains nor renews credentials; provisioning, lifetime, rotation,
+and private configuration access must be qualified before use. Destinations are
+operator-owned, never supplied by clients. Only HTTPS `/hint` URLs are accepted;
+URL credentials, queries, fragments, and redirects are not used.
+
+The repeater sends exactly
+`{"contract":"tinrelay-mail-hint-v1","local_ship":"example-ship"}` when that ship
+has unexpired pending ciphertext or an uncollected hail. It repeats the check
+sixty seconds after each sweep, including after success; startup checks again
+without relying on a saved hint ledger. Destinations are checked sequentially.
+TCP connection attempts have a ten-second timeout, followed by a ten-second
+TLS/HTTP-status deadline. DNS resolution uses the OS resolver; its timeout support
+is platform-dependent. Hint work runs outside transmission admission and database
+transactions. It never offers, collects, acknowledges, or rewrites mail.
+
+HTTP 2xx acknowledges only the hint. Any other status, timeout, or lost response
+leaves queue state unchanged for a later check. Responses are not body receipts
+and cannot command the repeater. Fixed `mail_hint` log outcomes report `accepted`,
+`not_accepted`, `authentication_failed` (401/403), or `transport_failed`, with
+numeric status when available; no response text, credential, or URL is logged.
+SIGHUP replaces the complete destination configuration with the other runtime
+policy; an already-started callback may finish using its prior configuration.
+
+The integration receiver must expose `/hint` and translate this separate signal
+into `tinrelay.mail.pending`, not a verified transmission event. Its ship-bound
+subscription has no attention filter; the repeater cannot read private attention.
+The designated task checks mail through ordinary authorized native collection.
+Receiver support and real suspended-chat wake require their own qualification;
+the receiver in this checkout does not yet implement this new hint event.
+Enabling a hook discloses pending-mail timing for the configured ship to the chosen
+sink. It creates no sender receipt and does not repair a reverting local spool.
+
 ## Local checks
 
 ```sh

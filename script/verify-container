@@ -60,6 +60,14 @@ case "$version" in
 esac
 [ "${version##* build }" = "$build_label" ]
 
+docker run --rm --platform linux/amd64 --user 10001:10001 --read-only \
+  --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/busybox \
+  "$image" sh -eu -c '
+    test "$SSL_CERT_FILE" = /etc/ssl/certs/ca-certificates.crt
+    test -r "$SSL_CERT_FILE"
+    test -s "$SSL_CERT_FILE"
+  '
+
 start_repeater() {
   docker run --detach \
     --name "$container" \

@@ -93,6 +93,17 @@ module Tinrelay
           cleanup_delay = 60.seconds
         end
       end
+      spawn do
+        loop do
+          break if stopping
+          begin
+            api.mail_hints_once
+          rescue ex
+            STDERR.puts({event: "mail_hint_check_failed", error: ex.class.name}.to_json)
+          end
+          sleep MailHints::INTERVAL
+        end
+      end
       STDERR.puts({
         event: "ready", bind: bind, port: port, protocol: PROTOCOL,
         threads: threads,

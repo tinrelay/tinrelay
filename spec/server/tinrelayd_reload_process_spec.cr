@@ -70,6 +70,78 @@ Spec.after_suite do
 end
 
 describe "tinrelayd runtime configuration process" do
+  it "rederives a body-free pending-mail hint on each native process startup" do
+    TinrelaydReloadProcessSpec.ensure_binary
+    TinrelaySpec.with_server do |root, origin, api|
+      alpha = TinrelaySpec.admit(root, origin, "alpha")
+      capture = TinrelaySpec::CaptureRemote.new(origin)
+      Tinrelay::Client.new(alpha.keyring, capture).send(
+        "probe@alpha", "Synthetic native hint proof", "probe"
+      )
+      envelope = capture.captured.last
+      api.store.accept(envelope)
+      api.database.db.exec("PRAGMA wal_checkpoint(TRUNCATE)")
+      target = File.join(root, "native.db")
+      FileUtils.cp(api.config.database_path, target)
+      tls_root = File.join(__DIR__, "../support/proxy_tls")
+      tls = OpenSSL::SSL::Context::Server.new
+      tls.certificate_chain = File.join(tls_root, "mail_hint.crt")
+      tls.private_key = File.join(tls_root, "fixture.key")
+      received = Channel(String).new(2)
+      sink = HTTP::Server.new do |http|
+        http.request.headers["Authorization"].should eq("Bearer fixture-only")
+        received.send(http.request.body.not_nil!.gets_to_end)
+        http.response.status_code = 202
+      end
+      port = sink.bind_tls("127.0.0.1", 0, tls).port
+      spawn { sink.listen }
+      configuration = Tinrelay::TinrelaydConfig.new(
+        mail_hints: [Tinrelay::MailHintDestination.new(
+          "alpha", "https://localhost:#{port}/hint", "Authorization", "Bearer fixture-only"
+        )], logging: Tinrelay::TinrelaydConfig::Logging.new(false)
+      )
+      config_path = File.join(root, "native.json")
+      File.write(config_path, configuration.to_json)
+      process = nil
+      begin
+        2.times do
+          errors = File.open(File.join(root, "native.log"), "a")
+          process = Process.new(
+            TinrelaydReloadProcessSpec::BINARY,
+            ["serve", "--database", target, "--port",
+             TinrelaydReloadProcessSpec.available_port.to_s, "--threads", "1",
+             "--config", config_path],
+            env: {"SSL_CERT_FILE" => File.join(tls_root, "mail_hint.crt")},
+            output: Process::Redirect::Close, error: errors
+          )
+          errors.close
+          TinrelaySpec.receive(received, 5.seconds).should eq(
+            %({"contract":"tinrelay-mail-hint-v1","local_ship":"alpha"})
+          )
+          process.signal(Signal::TERM)
+          process.wait.success?.should be_true
+          process = nil
+        end
+        verified = Tinrelay::Database.new(target)
+        begin
+          verified.db.query_one(
+            "SELECT state, ciphertext, signature FROM transmissions WHERE id = ?",
+            envelope.transmission_id, as: {String, Bytes, Bytes}
+          ).should eq({"pending", Tinrelay::Crypto.unb64(envelope.ciphertext),
+                       Tinrelay::Crypto.unb64(envelope.signature)})
+        ensure
+          verified.close
+        end
+      ensure
+        if running = process
+          running.signal(Signal::TERM)
+          running.wait
+        end
+        sink.close
+      end
+    end
+  end
+
   it "reloads one complete policy snapshot through SIGHUP" do
     TinrelaydReloadProcessSpec.ensure_binary
     root = TinrelaySpec.temporary_root

@@ -24,6 +24,9 @@ SQLite uses in-memory temporary storage on every pooled connection, so populated
 schema upgrades need no writable `/tmp`. The persistent database and WAL retain
 their existing full-synchronization and foreign-key settings.
 
+The image includes a read-only public CA bundle selected by `SSL_CERT_FILE` for
+ordinary verified outbound HTTPS; no writable certificate directory is required.
+
 The trusted edge routes API requests to `tinrelayd`. Public HTML and the First
 Light journey are built and served independently by `tinrelay-site`.
 
@@ -86,6 +89,11 @@ registration, logging, and client-address policy without restart. An unreadable,
 missing, or invalid reload keeps the complete last-known-good policy. Removing the
 conventional file restores defaults only on a fresh startup, not during reload. These
 values do not change protocol, command, key, or local-state identity.
+
+Optional operator-owned `mail_hints` destinations notify a ship that unexpired mail
+is pending without collecting or acknowledging it. Defaults send nothing. The
+integration contract and configuration example live in
+[the DOTS integration guide](adapters/dots/README.md#pending-mail-wake-hints).
 
 ## One process and one database
 

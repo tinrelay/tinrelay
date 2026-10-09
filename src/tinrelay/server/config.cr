@@ -1,6 +1,8 @@
 require "json"
 require "socket"
 require "http/headers"
+require "uri"
+require "set"
 require "../bounded_io"
 
 module Tinrelay
@@ -143,6 +145,40 @@ module Tinrelay
     end
   end
 
+  class MailHintDestination
+    include JSON::Serializable
+    include JSON::Serializable::Strict
+
+    getter ship : String
+    getter url : String
+    getter auth_header : String
+    getter auth_value : String
+
+    def initialize(@ship, @url, @auth_header, @auth_value)
+    end
+
+    def validate! : Nil
+      Names.ship!(ship)
+      uri = URI.parse(url)
+      unless uri.scheme == "https" && uri.host.try { |host| !host.empty? } &&
+             uri.path == "/hint" && !uri.query && !uri.fragment && !uri.user &&
+             (uri.port || 443).in?(1..65535) &&
+             !url.each_byte.any? { |byte| byte <= 32 || byte == 127 }
+        raise Invalid.new("mail hint destination must be an HTTPS /hint URL")
+      end
+      unless auth_header.bytesize.in?(1..64) && /^[A-Za-z][A-Za-z0-9-]*$/.matches?(auth_header) &&
+             !auth_header.downcase.in?({"host", "content-length", "transfer-encoding",
+                                        "connection", "content-type", "accept-encoding"}) &&
+             auth_value.bytesize.in?(1..4096) &&
+             !auth_value.strip.empty? &&
+             !auth_value.each_byte.any? { |byte| byte < 32 || byte == 127 }
+        raise Invalid.new("mail hint authentication header is invalid")
+      end
+    rescue URI::Error | ArgumentError
+      raise Invalid.new("mail hint destination is invalid")
+    end
+  end
+
   class TinrelaydConfig
     MAX_BYTES          = 64 * 1024
     MAX_EXCLUDED_SHIPS = 256
@@ -195,10 +231,24 @@ module Tinrelay
     getter registration : Registration = Registration.new
     getter client_address : ClientAddress = ClientAddress.new
     getter logging : Logging = Logging.new
+    getter mail_hints : Array(MailHintDestination) = [] of MailHintDestination
 
     def initialize(@registration = Registration.new,
                    @client_address = ClientAddress.new,
-                   @logging = Logging.new)
+                   @logging = Logging.new,
+                   @mail_hints = [] of MailHintDestination)
+    end
+
+    def validated_mail_hints : Array(MailHintDestination)
+      raise Invalid.new("too many mail hint destinations") if mail_hints.size > 16
+      seen = Set(String).new
+      mail_hints.each do |destination|
+        destination.validate!
+        unless seen.add?(destination.ship)
+          raise Invalid.new("mail hint ships must be unique")
+        end
+      end
+      mail_hints.dup
     end
 
     def registration_allowances : RegistrationAllowances

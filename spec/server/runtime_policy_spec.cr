@@ -413,6 +413,34 @@ describe "tinrelayd runtime policy" do
     {% end %}
   end
 
+  it "reloads operator hint destinations atomically without changing the last valid policy" do
+    root = TinrelaySpec.temporary_root
+    path = File.join(root, "tinrelayd.json")
+    TinrelayRuntimePolicySpec.write_defaults(path)
+    api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
+    begin
+      destination = Tinrelay::MailHintDestination.new(
+        "alpha", "https://sink.example/hint", "Authorization", "Bearer fixture-only"
+      )
+      File.write(path, Tinrelay::TinrelaydConfig.new(mail_hints: [destination]).to_json)
+      api.reload_configuration
+      prior = api.runtime_snapshot
+      prior.mail_hints.map(&.ship).should eq(["alpha"])
+      prior.mail_hints.clear
+      prior.mail_hints.size.should eq(1)
+      invalid = Tinrelay::TinrelaydConfig.new(mail_hints: [destination, destination])
+      File.write(path, invalid.to_json)
+      expect_raises(Tinrelay::Invalid) { api.reload_configuration }
+      api.runtime_snapshot.same?(prior).should be_true
+      TinrelayRuntimePolicySpec.write_defaults(path)
+      api.reload_configuration
+      api.runtime_snapshot.mail_hints.should be_empty
+    ensure
+      api.close
+      FileUtils.rm_r(root)
+    end
+  end
+
   it "trusts exactly one literal client address only from a configured ingress" do
     policy = Tinrelay::ClientAddressPolicy.new(
       "trusted_proxy", ["192.0.2.0/24", "2001:db8::/32"]
