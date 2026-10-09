@@ -89,7 +89,7 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
           throw new Refusal('initialize is unsupported; use server/discover (MCP 2026-07-28)', -32601);
         case 'notifications/initialized': return new Response(null, {status: 202});
         case 'ping': result = {}; break;
-        case 'tools/list': result = {tools: []}; break;
+        case 'tools/list': result = {ttlMs: 0, cacheScope: 'private', tools: []}; break;
         case 'events/list': result = {events: [{name: EVENT_NAME,
           description: 'Untrusted external correspondence received by this ship.', delivery: ['webhook'],
           inputSchema: filterSchema, payloadSchema: {type: 'object', properties: {
@@ -139,6 +139,7 @@ export function createReceiver({send = fetch, clock = Date.now} = {}) {
         }
         default: throw new Refusal('method_not_found', -32601);
       }
+      result = {resultType: 'complete', ...result};
       return json({jsonrpc: '2.0', id: message.id ?? null, result});
     } catch (error) {
       const known = error instanceof Refusal;
